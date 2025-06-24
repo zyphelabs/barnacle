@@ -5,17 +5,22 @@ use axum::{body::Body, http::Request, response::Response};
 use tower::Layer;
 use tower::Service;
 
-use crate::{BarnacleStore, types::BarnacleConfig};
+use crate::{BarnacleStore, types::{BarnacleConfig, BarnacleKey}};
 
 /// Rate limiting middleware for Axum
 pub struct BarnacleLayer<S: BarnacleStore + 'static> {
     store: Arc<S>,
     config: BarnacleConfig,
+    key_extractor: Arc<dyn Fn(&Request<Body>) -> Option<BarnacleKey> + Send + Sync>,
 }
 
 impl<S: BarnacleStore + 'static> BarnacleLayer<S> {
-    pub fn new(store: Arc<S>, config: BarnacleConfig) -> Self {
-        Self { store, config }
+    pub fn new(
+        store: Arc<S>,
+        config: BarnacleConfig,
+        key_extractor: Arc<dyn Fn(&Request<Body>) -> Option<BarnacleKey> + Send + Sync>,
+    ) -> Self {
+        Self { store, config, key_extractor }
     }
 }
 
@@ -24,6 +29,7 @@ impl<S: BarnacleStore + 'static> Clone for BarnacleLayer<S> {
         Self {
             store: self.store.clone(),
             config: self.config.clone(),
+            key_extractor: self.key_extractor.clone(),
         }
     }
 }
@@ -39,6 +45,7 @@ where
             inner,
             store: self.store.clone(),
             config: self.config.clone(),
+            key_extractor: self.key_extractor.clone(),
         }
     }
 }
@@ -48,6 +55,7 @@ pub struct BarnacleMiddleware<S: BarnacleStore + 'static, Inner> {
     inner: Inner,
     store: Arc<S>,
     config: BarnacleConfig,
+    key_extractor: Arc<dyn Fn(&Request<Body>) -> Option<BarnacleKey> + Send + Sync>,
 }
 
 impl<S, Inner> Clone for BarnacleMiddleware<S, Inner>
@@ -60,6 +68,7 @@ where
             inner: self.inner.clone(),
             store: self.store.clone(),
             config: self.config.clone(),
+            key_extractor: self.key_extractor.clone(),
         }
     }
 }
@@ -84,15 +93,18 @@ where
         let store = self.store.clone();
         let config = self.config.clone();
         let mut inner = self.inner.clone();
+        let key_extractor = self.key_extractor.clone();
 
         Box::pin(async move {
-            // Extract rate limit key from request (IP address for now)
-            let key = crate::types::BarnacleKey::Ip(
-                req.extensions()
-                    .get::<std::net::SocketAddr>()
-                    .map(|addr| addr.ip().to_string())
-                    .unwrap_or_else(|| "unknown".to_string()),
-            );
+            let key = (key_extractor)(&req).unwrap_or_else(|| {
+                // Fallback to IP
+                BarnacleKey::Ip(
+                    req.extensions()
+                        .get::<std::net::SocketAddr>()
+                        .map(|addr| addr.ip().to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                )
+            });
 
             // Check rate limit
             let result = store.increment(&key, &config).await;
@@ -108,14 +120,35 @@ where
                             .map(|d| d.as_secs().to_string())
                             .unwrap_or_else(|| "60".to_string()),
                     )
+                    .header("X-RateLimit-Remaining", "0")
+                    .header("X-RateLimit-Limit", config.max_requests.to_string())
                     .body(Body::from("Rate limit exceeded"))
                     .unwrap();
 
                 return Ok(response);
             }
 
-            // Continue with the request
-            inner.call(req).await
+            // Continue with the request and add rate limit headers
+            let mut response = inner.call(req).await?;
+            
+            // Add rate limit headers to successful responses
+            let headers = response.headers_mut();
+            headers.insert("X-RateLimit-Remaining", result.remaining.to_string().parse().unwrap());
+            headers.insert("X-RateLimit-Limit", config.max_requests.to_string().parse().unwrap());
+            
+            if let Some(retry_after) = result.retry_after {
+                headers.insert("X-RateLimit-Reset", retry_after.as_secs().to_string().parse().unwrap());
+            }
+
+            Ok(response)
         })
     }
+}
+
+pub fn barnacle_layer_with_key_extractor<S: BarnacleStore + 'static>(
+    store: Arc<S>,
+    config: BarnacleConfig,
+    key_extractor: Arc<dyn Fn(&Request<Body>) -> Option<BarnacleKey> + Send + Sync>,
+) -> BarnacleLayer<S> {
+    BarnacleLayer::new(store, config, key_extractor)
 }
