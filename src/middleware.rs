@@ -5,7 +5,10 @@ use axum::{body::Body, http::Request, response::Response};
 use tower::Layer;
 use tower::Service;
 
-use crate::{BarnacleStore, types::{BarnacleConfig, BarnacleKey}};
+use crate::{
+    BarnacleStore,
+    types::{BarnacleConfig, BarnacleKey},
+};
 
 /// Rate limiting middleware for Axum
 pub struct BarnacleLayer<S: BarnacleStore + 'static> {
@@ -20,7 +23,11 @@ impl<S: BarnacleStore + 'static> BarnacleLayer<S> {
         config: BarnacleConfig,
         key_extractor: Arc<dyn Fn(&Request<Body>) -> Option<BarnacleKey> + Send + Sync>,
     ) -> Self {
-        Self { store, config, key_extractor }
+        Self {
+            store,
+            config,
+            key_extractor,
+        }
     }
 }
 
@@ -97,17 +104,53 @@ where
 
         Box::pin(async move {
             let key = (key_extractor)(&req).unwrap_or_else(|| {
-                // Fallback to IP
-                BarnacleKey::Ip(
-                    req.extensions()
-                        .get::<std::net::SocketAddr>()
-                        .map(|addr| addr.ip().to_string())
-                        .unwrap_or_else(|| "unknown".to_string()),
-                )
+                // IP fallback: try ConnectInfo, then X-Forwarded-For, then X-Real-IP, then local fallback
+                println!("Req: {:?}", req);
+
+                // 1. Try ConnectInfo<SocketAddr>
+                if let Some(addr) = req
+                    .extensions()
+                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                {
+                    println!("[Barnacle] IP via ConnectInfo: {}", addr.ip());
+                    return BarnacleKey::Ip(addr.ip().to_string());
+                }
+
+                // 2. Try X-Forwarded-For header
+                if let Some(forwarded) = req.headers().get("x-forwarded-for") {
+                    if let Ok(forwarded) = forwarded.to_str() {
+                        let ip = forwarded.split(',').next().unwrap_or("").trim();
+                        if !ip.is_empty() && ip != "unknown" {
+                            println!("[Barnacle] IP via X-Forwarded-For: {}", ip);
+                            return BarnacleKey::Ip(ip.to_string());
+                        }
+                    }
+                }
+
+                // 3. Try X-Real-IP header
+                if let Some(real_ip) = req.headers().get("x-real-ip") {
+                    if let Ok(real_ip) = real_ip.to_str() {
+                        if !real_ip.is_empty() && real_ip != "unknown" {
+                            println!("[Barnacle] IP via X-Real-IP: {}", real_ip);
+                            return BarnacleKey::Ip(real_ip.to_string());
+                        }
+                    }
+                }
+
+                // 4. For local requests, use a unique identifier based on route + method
+                let path = req.uri().path();
+                let method = req.method().as_str();
+                let local_key = format!("local:{}:{}", method, path);
+                println!("[Barnacle] Using local fallback key: {}", local_key);
+                BarnacleKey::Ip(local_key)
             });
+
+            println!("Key: {:?}", key);
 
             // Check rate limit
             let result = store.increment(&key, &config).await;
+
+            println!("Result: {:?}\n\n", result);
 
             if !result.allowed {
                 // Return 429 Too Many Requests
@@ -130,14 +173,23 @@ where
 
             // Continue with the request and add rate limit headers
             let mut response = inner.call(req).await?;
-            
+
             // Add rate limit headers to successful responses
             let headers = response.headers_mut();
-            headers.insert("X-RateLimit-Remaining", result.remaining.to_string().parse().unwrap());
-            headers.insert("X-RateLimit-Limit", config.max_requests.to_string().parse().unwrap());
-            
+            headers.insert(
+                "X-RateLimit-Remaining",
+                result.remaining.to_string().parse().unwrap(),
+            );
+            headers.insert(
+                "X-RateLimit-Limit",
+                config.max_requests.to_string().parse().unwrap(),
+            );
+
             if let Some(retry_after) = result.retry_after {
-                headers.insert("X-RateLimit-Reset", retry_after.as_secs().to_string().parse().unwrap());
+                headers.insert(
+                    "X-RateLimit-Reset",
+                    retry_after.as_secs().to_string().parse().unwrap(),
+                );
             }
 
             Ok(response)

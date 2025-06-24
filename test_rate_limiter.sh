@@ -21,12 +21,21 @@ make_request() {
     local method=$1
     local endpoint=$2
     local data=$3
+    local extra_header=$4
     
     if [ -n "$data" ]; then
-        response=$(curl -s -w "\n%{http_code}" -X "$method" \
-            -H "Content-Type: application/json" \
-            -d "$data" \
-            "$BASE_URL$endpoint")
+        if [ -n "$extra_header" ]; then
+            response=$(curl -s -w "\n%{http_code}" -X "$method" \
+                -H "Content-Type: application/json" \
+                -H "$extra_header" \
+                -d "$data" \
+                "$BASE_URL$endpoint")
+        else
+            response=$(curl -s -w "\n%{http_code}" -X "$method" \
+                -H "Content-Type: application/json" \
+                -d "$data" \
+                "$BASE_URL$endpoint")
+        fi
     else
         response=$(curl -s -w "\n%{http_code}" -X "$method" \
             "$BASE_URL$endpoint")
@@ -76,7 +85,7 @@ echo
 
 for i in {1..4}; do
     echo -e "${YELLOW}Login attempt $i:${NC}"
-    make_request "POST" "/api/login" '{"email":"test@example.com","password":"wrong_password"}'
+    make_request "POST" "/api/login" '{"email":"test@example.com","password":"wrong_password"}' "X-Login-Email: test@example.com"
     sleep 0.5
 done
 
@@ -88,7 +97,7 @@ echo -e "${BLUE}Test 4: Successful Login with Rate Limit Reset${NC}"
 echo "Testing login with correct password..."
 echo
 
-make_request "POST" "/api/login" '{"email":"test@example.com","password":"correct_password"}'
+make_request "POST" "/api/login" '{"email":"test@example.com","password":"correct_password"}' "X-Login-Email: test@example.com"
 
 echo -e "${GREEN}Expected: Should succeed (200) and reset rate limit${NC}"
 echo

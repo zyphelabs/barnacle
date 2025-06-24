@@ -9,6 +9,17 @@ pub struct BarnacleConfig {
     pub reset_on_success: bool,
 }
 
+impl Default for BarnacleConfig {
+    fn default() -> Self {
+        Self {
+            max_requests: 20,
+            window: Duration::from_secs(60), // 1 minute
+            backoff: None,
+            reset_on_success: false,
+        }
+    }
+}
+
 /// Identification key for rate limiting (e.g., email, api-key, IP)
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BarnacleKey {
