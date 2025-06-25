@@ -55,6 +55,7 @@ async fn main() {
         window: Duration::from_secs(60),
         backoff: None,
         reset_on_success: false,
+        success_status_codes: None,
     };
 
     let moderate_config = BarnacleConfig {
@@ -62,6 +63,7 @@ async fn main() {
         window: Duration::from_secs(60),
         backoff: None,
         reset_on_success: false,
+        success_status_codes: None,
     };
 
     let login_config = BarnacleConfig {
@@ -69,6 +71,7 @@ async fn main() {
         window: Duration::from_secs(20),
         backoff: None,
         reset_on_success: true,
+        success_status_codes: Some(vec![200]),
     };
 
     let login_layer =
@@ -117,7 +120,7 @@ async fn moderate_endpoint(headers: HeaderMap) -> Json<ApiResponse> {
 }
 
 async fn login_endpoint(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     _headers: HeaderMap,
     Json(login_req): Json<LoginRequest>,
 ) -> axum::response::Response {
@@ -129,11 +132,6 @@ async fn login_endpoint(
 
     // First, validate the password
     if login_req.password == "correct_password" {
-        let key = BarnacleKey::Email(login_req.email.clone());
-        if let Err(_) = state.store.reset(&key).await {
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-
         Json(LoginResponse {
             message: "Login successful! Rate limit reset.".to_string(),
             api_key: "fake_api_key_12345".to_string(),

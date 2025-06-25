@@ -125,6 +125,9 @@ echo "Testing login with correct password..."
 echo
 
 make_request "POST" "/api/login" '{"email":"test@example.com","password":"correct_password"}' "X-Login-Email: test@example.com"
+make_request "POST" "/api/login" '{"email":"test@example.com","password":"correct_password"}' "X-Login-Email: test@example.com"
+make_request "POST" "/api/login" '{"email":"test@example.com","password":"correct_password"}' "X-Login-Email: test@example.com"
+
 
 echo -e "${GREEN}Expected: Should succeed (200) and reset rate limit${NC}"
 echo

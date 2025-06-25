@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use tracing::{debug, warn};
 
 use crate::{
     BarnacleStore,
@@ -126,7 +125,7 @@ where
 
                     if !result.allowed {
                         println!(
-                            "[GenericRateLimit] Rate limit exceeded for fallback key: {:?}",
+                            "[GenericRateLimit] Rate limit exceeded for fallback key: {:?}\n\n",
                             fallback_key
                         );
 
@@ -149,13 +148,38 @@ where
                     }
 
                     // Log successful rate limit check for fallback
-                    debug!(
-                        "[GenericRateLimit] Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
+                    println!(
+                        "[GenericRateLimit] Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}\n\n",
                         fallback_key, result.remaining, result.retry_after
                     );
 
                     let req = Request::from_parts(parts, axum::body::Body::empty());
-                    return inner.call(req).await;
+                    let response = inner.call(req).await?;
+
+                    // Reset rate limit on successful request if configured
+                    if config.reset_on_success {
+                        let status_code = response.status().as_u16();
+                        if config.is_success_status(status_code) {
+                            if let Err(e) = store.reset(&fallback_key).await {
+                                println!(
+                                    "[GenericRateLimit] Failed to reset rate limit for fallback key {:?}: {}\n\n",
+                                    fallback_key, e
+                                );
+                            } else {
+                                println!(
+                                    "[GenericRateLimit] Rate limit reset for fallback key {:?} after successful request (status: {})\n\n",
+                                    fallback_key, status_code
+                                );
+                            }
+                        } else {
+                            println!(
+                                "[GenericRateLimit] Not resetting rate limit for fallback key {:?} due to error status: {}\n\n",
+                                fallback_key, status_code
+                            );
+                        }
+                    }
+
+                    return Ok(response);
                 }
             };
 
@@ -166,8 +190,6 @@ where
             };
 
             let result = store.increment(&rate_limit_key, &config).await;
-
-            debug!("[GenericRateLimit] Rate limit result: {:?}", result);
 
             if !result.allowed {
                 println!(
@@ -194,8 +216,8 @@ where
             }
 
             // Log successful rate limit check
-            debug!(
-                "[GenericRateLimit] Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
+            println!(
+                "[GenericRateLimit] Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}\n\n",
                 rate_limit_key, result.remaining, result.retry_after
             );
 
@@ -203,7 +225,32 @@ where
             let new_body = axum::body::Body::from(body_bytes);
             let new_req = Request::from_parts(parts, new_body);
 
-            inner.call(new_req).await
+            let response = inner.call(new_req).await?;
+
+            // Reset rate limit on successful request if configured
+            if config.reset_on_success {
+                let status_code = response.status().as_u16();
+                if config.is_success_status(status_code) {
+                    if let Err(e) = store.reset(&rate_limit_key).await {
+                        println!(
+                            "[GenericRateLimit] Failed to reset rate limit for key {:?}: {}\n\n",
+                            rate_limit_key, e
+                        );
+                    } else {
+                        println!(
+                            "[GenericRateLimit] Rate limit reset for key {:?} after successful request (status: {})\n\n",
+                            rate_limit_key, status_code
+                        );
+                    }
+                } else {
+                    println!(
+                        "[GenericRateLimit] Not resetting rate limit for key {:?} due to error status: {}\n\n",
+                        rate_limit_key, status_code
+                    );
+                }
+            }
+
+            Ok(response)
         })
     }
 }

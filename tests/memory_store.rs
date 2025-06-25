@@ -98,6 +98,7 @@ mod tests {
             window: Duration::from_secs(60),
             backoff: None,
             reset_on_success: false,
+            success_status_codes: None,
         };
 
         let key = BarnacleKey::Ip("127.0.0.1".to_string());
@@ -124,6 +125,7 @@ mod tests {
             window: Duration::from_secs(60),
             backoff: None,
             reset_on_success: false,
+            success_status_codes: None,
         };
 
         let key = BarnacleKey::Email("test@example.com".to_string());
@@ -155,6 +157,7 @@ mod tests {
             window: Duration::from_secs(60),
             backoff: None,
             reset_on_success: false,
+            success_status_codes: None,
         };
 
         let ip_key = BarnacleKey::Ip("127.0.0.1".to_string());
@@ -188,6 +191,7 @@ mod tests {
             window: Duration::from_millis(100), // Very short window for testing
             backoff: None,
             reset_on_success: false,
+            success_status_codes: None,
         };
 
         let key = BarnacleKey::Ip("127.0.0.1".to_string());
@@ -206,5 +210,72 @@ mod tests {
         // Should be able to make requests again
         let result = store.increment(&key, &config).await;
         assert!(result.allowed);
+        assert_eq!(result.remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn test_reset_on_success() {
+        let store = Arc::new(MemoryBarnacleStore::new());
+        let config = BarnacleConfig {
+            max_requests: 2,
+            window: Duration::from_secs(60),
+            backoff: None,
+            reset_on_success: true,
+            success_status_codes: None,
+        };
+
+        let key = BarnacleKey::Email("test@example.com".to_string());
+
+        // First request should be allowed
+        let result = store.increment(&key, &config).await;
+        assert!(result.allowed);
+        assert_eq!(result.remaining, 1);
+
+        // Second request should be allowed
+        let result = store.increment(&key, &config).await;
+        assert!(result.allowed);
+        assert_eq!(result.remaining, 0);
+
+        // Third request should be blocked
+        let result = store.increment(&key, &config).await;
+        assert!(!result.allowed);
+
+        // Reset the rate limit manually
+        store.reset(&key).await.unwrap();
+
+        // Should be able to make requests again
+        let result = store.increment(&key, &config).await;
+        assert!(result.allowed);
+        assert_eq!(result.remaining, 1);
+    }
+
+    #[tokio::test]
+    async fn test_success_status_codes() {
+        let store = Arc::new(MemoryBarnacleStore::new());
+        let config = BarnacleConfig {
+            max_requests: 2,
+            window: Duration::from_secs(60),
+            backoff: None,
+            reset_on_success: true,
+            success_status_codes: Some(vec![200, 201]), // Only reset on 200 and 201
+        };
+
+        let key = BarnacleKey::Email("test@example.com".to_string());
+
+        // Test that 200 is considered success
+        assert!(config.is_success_status(200));
+        assert!(config.is_success_status(201));
+
+        // Test that 401 is not considered success
+        assert!(!config.is_success_status(401));
+        assert!(!config.is_success_status(500));
+
+        // Test that 2xx codes are considered success by default
+        let default_config = BarnacleConfig::default();
+        assert!(default_config.is_success_status(200));
+        assert!(default_config.is_success_status(201));
+        assert!(default_config.is_success_status(204));
+        assert!(!default_config.is_success_status(401));
+        assert!(!default_config.is_success_status(500));
     }
 }

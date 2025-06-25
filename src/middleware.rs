@@ -167,6 +167,28 @@ where
             // Continue with the request and add rate limit headers
             let mut response = inner.call(req).await?;
 
+            // Reset rate limit on successful request if configured
+            if config.reset_on_success {
+                let status_code = response.status().as_u16();
+                if config.is_success_status(status_code) {
+                    if let Err(e) = store.reset(&key).await {
+                        tracing::warn!("Failed to reset rate limit for key {:?}: {}", key, e);
+                    } else {
+                        tracing::debug!(
+                            "Rate limit reset for key {:?} after successful request (status: {})",
+                            key,
+                            status_code
+                        );
+                    }
+                } else {
+                    tracing::debug!(
+                        "Not resetting rate limit for key {:?} due to error status: {}",
+                        key,
+                        status_code
+                    );
+                }
+            }
+
             // Add rate limit headers to successful responses
             let headers = response.headers_mut();
             headers.insert(
