@@ -21,6 +21,7 @@ impl MemoryBarnacleStore {
             BarnacleKey::Email(email) => format!("email:{}", email),
             BarnacleKey::ApiKey(api_key) => format!("api_key:{}", api_key),
             BarnacleKey::Ip(ip) => format!("ip:{}", ip),
+            BarnacleKey::Custom(custom_data) => format!("custom:{}", custom_data),
         }
     }
 }

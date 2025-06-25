@@ -114,12 +114,9 @@ where
 
         Box::pin(async move {
             let (parts, body) = req.into_parts();
-
-            // Extract body bytes
             let body_bytes = match body.collect().await {
                 Ok(collected) => collected.to_bytes(),
                 Err(_) => {
-                    // If we can't collect the body, use IP fallback and check rate limit
                     let fallback_key = get_fallback_key(&parts);
                     let result = store.increment(&fallback_key, &config).await;
 
@@ -129,25 +126,9 @@ where
                             fallback_key
                         );
 
-                        // Return 429 Too Many Requests
-                        let response = Response::builder()
-                            .status(429)
-                            .header(
-                                "Retry-After",
-                                result
-                                    .retry_after
-                                    .map(|d| d.as_secs().to_string())
-                                    .unwrap_or_else(|| "60".to_string()),
-                            )
-                            .header("X-RateLimit-Remaining", "0")
-                            .header("X-RateLimit-Limit", config.max_requests.to_string())
-                            .body(Body::from("Rate limit exceeded"))
-                            .unwrap();
-
-                        return Ok(response);
+                        return Ok(create_rate_limit_response(result, &config));
                     }
 
-                    // Log successful rate limit check for fallback
                     println!(
                         "[GenericRateLimit] Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}\n\n",
                         fallback_key, result.remaining, result.retry_after
@@ -156,28 +137,14 @@ where
                     let req = Request::from_parts(parts, axum::body::Body::empty());
                     let response = inner.call(req).await?;
 
-                    // Reset rate limit on successful request if configured
-                    if config.reset_on_success {
-                        let status_code = response.status().as_u16();
-                        if config.is_success_status(status_code) {
-                            if let Err(e) = store.reset(&fallback_key).await {
-                                println!(
-                                    "[GenericRateLimit] Failed to reset rate limit for fallback key {:?}: {}\n\n",
-                                    fallback_key, e
-                                );
-                            } else {
-                                println!(
-                                    "[GenericRateLimit] Rate limit reset for fallback key {:?} after successful request (status: {})\n\n",
-                                    fallback_key, status_code
-                                );
-                            }
-                        } else {
-                            println!(
-                                "[GenericRateLimit] Not resetting rate limit for fallback key {:?} due to error status: {}\n\n",
-                                fallback_key, status_code
-                            );
-                        }
-                    }
+                    handle_rate_limit_reset(
+                        &store,
+                        &config,
+                        &fallback_key,
+                        response.status().as_u16(),
+                        true,
+                    )
+                    .await;
 
                     return Ok(response);
                 }
@@ -197,61 +164,85 @@ where
                     rate_limit_key
                 );
 
-                // Return 429 Too Many Requests
-                let response = Response::builder()
-                    .status(429)
-                    .header(
-                        "Retry-After",
-                        result
-                            .retry_after
-                            .map(|d| d.as_secs().to_string())
-                            .unwrap_or_else(|| "60".to_string()),
-                    )
-                    .header("X-RateLimit-Remaining", "0")
-                    .header("X-RateLimit-Limit", config.max_requests.to_string())
-                    .body(Body::from("Rate limit exceeded"))
-                    .unwrap();
-
-                return Ok(response);
+                return Ok(create_rate_limit_response(result, &config));
             }
 
-            // Log successful rate limit check
             println!(
                 "[GenericRateLimit] Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}\n\n",
                 rate_limit_key, result.remaining, result.retry_after
             );
 
-            // Reconstruct request with original body
             let new_body = axum::body::Body::from(body_bytes);
             let new_req = Request::from_parts(parts, new_body);
 
             let response = inner.call(new_req).await?;
 
-            // Reset rate limit on successful request if configured
-            if config.reset_on_success {
-                let status_code = response.status().as_u16();
-                if config.is_success_status(status_code) {
-                    if let Err(e) = store.reset(&rate_limit_key).await {
-                        println!(
-                            "[GenericRateLimit] Failed to reset rate limit for key {:?}: {}\n\n",
-                            rate_limit_key, e
-                        );
-                    } else {
-                        println!(
-                            "[GenericRateLimit] Rate limit reset for key {:?} after successful request (status: {})\n\n",
-                            rate_limit_key, status_code
-                        );
-                    }
-                } else {
-                    println!(
-                        "[GenericRateLimit] Not resetting rate limit for key {:?} due to error status: {}\n\n",
-                        rate_limit_key, status_code
-                    );
-                }
-            }
+            handle_rate_limit_reset(
+                &store,
+                &config,
+                &rate_limit_key,
+                response.status().as_u16(),
+                false,
+            )
+            .await;
 
             Ok(response)
         })
+    }
+}
+
+/// Helper function to create a rate limit exceeded response
+fn create_rate_limit_response(
+    result: crate::types::BarnacleResult,
+    config: &BarnacleConfig,
+) -> Response<Body> {
+    Response::builder()
+        .status(429)
+        .header(
+            "Retry-After",
+            result
+                .retry_after
+                .map(|d| d.as_secs().to_string())
+                .unwrap_or_else(|| "60".to_string()),
+        )
+        .header("X-RateLimit-Remaining", "0")
+        .header("X-RateLimit-Limit", config.max_requests.to_string())
+        .body(Body::from("Rate limit exceeded"))
+        .unwrap()
+}
+
+/// Helper function to handle rate limit reset logic
+async fn handle_rate_limit_reset<S>(
+    store: &Arc<S>,
+    config: &BarnacleConfig,
+    key: &BarnacleKey,
+    status_code: u16,
+    is_fallback: bool,
+) where
+    S: BarnacleStore + 'static,
+{
+    if !config.reset_on_success {
+        return;
+    }
+
+    let key_type = if is_fallback { "fallback key" } else { "key" };
+    if !config.is_success_status(status_code) {
+        println!(
+            "[GenericRateLimit] Not resetting rate limit for {} {:?} due to error status: {}\n\n",
+            key_type, key, status_code
+        );
+        return;
+    }
+
+    match store.reset(key).await {
+        Ok(_) => println!(
+            "[GenericRateLimit] Rate limit reset for {} {:?} after successful request (status: {})\n\n",
+            key_type, key, status_code
+        ),
+        Err(e) => println!(
+            "[GenericRateLimit] Failed to reset rate limit for {} {:?}: {}\n\n",
+            key_type, key, e
+        ),
     }
 }
 

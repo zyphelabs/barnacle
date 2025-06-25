@@ -25,6 +25,7 @@ impl RedisBarnacleStore {
             BarnacleKey::Email(email) => format!("barnacle:email:{}", email),
             BarnacleKey::ApiKey(api_key) => format!("barnacle:api_key:{}", api_key),
             BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
+            BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
         }
     }
 
@@ -33,6 +34,7 @@ impl RedisBarnacleStore {
             BarnacleKey::Email(email) => format!("barnacle:failures:email:{}", email),
             BarnacleKey::ApiKey(api_key) => format!("barnacle:failures:api_key:{}", api_key),
             BarnacleKey::Ip(ip) => format!("barnacle:failures:ip:{}", ip),
+            BarnacleKey::Custom(custom_data) => format!("barnacle:failures:custom:{}", custom_data),
         }
     }
 
