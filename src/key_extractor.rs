@@ -1,10 +1,13 @@
+use axum::body::Body;
 use axum::extract::Request;
+use axum::http::Response;
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
+use tracing::{debug, warn};
 
 use crate::{
     BarnacleStore,
@@ -87,7 +90,7 @@ where
 
 impl<Inner, B, T, S> Service<Request<B>> for GenericRateLimitService<Inner, T, S>
 where
-    Inner: Service<Request<axum::body::Body>> + Clone + Send + 'static,
+    Inner: Service<Request<axum::body::Body>, Response = Response<Body>> + Clone + Send + 'static,
     Inner::Future: Send + 'static,
     B: axum::body::HttpBody + Send + 'static,
     B::Data: Send,
@@ -117,7 +120,7 @@ where
             let body_bytes = match body.collect().await {
                 Ok(collected) => collected.to_bytes(),
                 Err(_) => {
-                    // If we can't collect the body, use IP fallback and continue
+                    // If we can't collect the body, use IP fallback and check rate limit
                     let fallback_key = get_fallback_key(&parts);
                     let result = store.increment(&fallback_key, &config).await;
 
@@ -126,6 +129,23 @@ where
                             "[GenericRateLimit] Rate limit exceeded for fallback key: {:?}",
                             fallback_key
                         );
+
+                        // Return 429 Too Many Requests
+                        let response = Response::builder()
+                            .status(429)
+                            .header(
+                                "Retry-After",
+                                result
+                                    .retry_after
+                                    .map(|d| d.as_secs().to_string())
+                                    .unwrap_or_else(|| "60".to_string()),
+                            )
+                            .header("X-RateLimit-Remaining", "0")
+                            .header("X-RateLimit-Limit", config.max_requests.to_string())
+                            .body(Body::from("Rate limit exceeded"))
+                            .unwrap();
+
+                        return Ok(response);
                     }
 
                     let req = Request::from_parts(parts, axum::body::Body::empty());
@@ -133,28 +153,38 @@ where
                 }
             };
 
-            // Try to parse payload for rate limiting
             let rate_limit_key = if let Ok(payload) = serde_json::from_slice::<T>(&body_bytes) {
                 payload.extract_key()
             } else {
-                // If parsing fails, fall back to IP-based rate limiting
                 get_fallback_key(&parts)
             };
 
-            println!(
-                "[GenericRateLimit] Checking rate limit for key: {:?}",
-                rate_limit_key
-            );
-
-            // Check rate limit
             let result = store.increment(&rate_limit_key, &config).await;
 
-            println!("[GenericRateLimit] Rate limit result: {:?}", result);
+            debug!("[GenericRateLimit] Rate limit result: {:?}", result);
 
             if !result.allowed {
                 println!(
-                    "[GenericRateLimit] Rate limit exceeded - request will continue but rate limit was applied"
+                    "[GenericRateLimit] Rate limit exceeded for key: {:?}",
+                    rate_limit_key
                 );
+
+                // Return 429 Too Many Requests
+                let response = Response::builder()
+                    .status(429)
+                    .header(
+                        "Retry-After",
+                        result
+                            .retry_after
+                            .map(|d| d.as_secs().to_string())
+                            .unwrap_or_else(|| "60".to_string()),
+                    )
+                    .header("X-RateLimit-Remaining", "0")
+                    .header("X-RateLimit-Limit", config.max_requests.to_string())
+                    .body(Body::from("Rate limit exceeded"))
+                    .unwrap();
+
+                return Ok(response);
             }
 
             // Reconstruct request with original body

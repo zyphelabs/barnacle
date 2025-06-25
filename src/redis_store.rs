@@ -6,6 +6,7 @@ use redis::AsyncCommands;
 
 use crate::{
     BarnacleStore,
+    backoff::next_backoff,
     types::{BarnacleConfig, BarnacleKey, BarnacleResult},
 };
 
@@ -26,6 +27,37 @@ impl RedisBarnacleStore {
             BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
         }
     }
+
+    fn get_failure_count_key(&self, key: &BarnacleKey) -> String {
+        match key {
+            BarnacleKey::Email(email) => format!("barnacle:failures:email:{}", email),
+            BarnacleKey::ApiKey(api_key) => format!("barnacle:failures:api_key:{}", api_key),
+            BarnacleKey::Ip(ip) => format!("barnacle:failures:ip:{}", ip),
+        }
+    }
+
+    /// Increment failure count for backoff calculation
+    async fn increment_failure_count(&self, key: &BarnacleKey) -> Result<u32, redis::RedisError> {
+        let failure_key = self.get_failure_count_key(key);
+        let mut conn = self.client.get_async_connection().await?;
+
+        let count: u32 = conn.incr(&failure_key, 1).await?;
+        // Set expiration to prevent indefinite storage (24 hours)
+        let _: () = conn.expire(&failure_key, 86400).await?;
+
+        Ok(count)
+    }
+
+    /// Get current failure count
+    async fn get_failure_count(&self, key: &BarnacleKey) -> u32 {
+        let failure_key = self.get_failure_count_key(key);
+        let mut conn = match self.client.get_async_connection().await {
+            Ok(conn) => conn,
+            Err(_) => return 0,
+        };
+
+        conn.get(&failure_key).await.unwrap_or(0)
+    }
 }
 
 #[async_trait]
@@ -37,12 +69,13 @@ impl BarnacleStore for RedisBarnacleStore {
         // Get Redis connection
         let mut conn = match self.client.get_async_connection().await {
             Ok(conn) => conn,
-            Err(_) => {
-                // If Redis is unavailable, allow the request but log the error
+            Err(e) => {
+                // If Redis is unavailable, log the error and deny the request for safety
+                eprintln!("Redis connection failed: {}", e);
                 return BarnacleResult {
-                    allowed: true,
-                    remaining: config.max_requests,
-                    retry_after: None,
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
                 };
             }
         };
@@ -56,12 +89,13 @@ impl BarnacleStore for RedisBarnacleStore {
             .await
         {
             Ok(result) => result,
-            Err(_) => {
-                // If Redis operation fails, allow the request
+            Err(e) => {
+                // If Redis operation fails, log the error and deny the request for safety
+                eprintln!("Redis pipeline operation failed: {}", e);
                 return BarnacleResult {
-                    allowed: true,
-                    remaining: config.max_requests,
-                    retry_after: None,
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
                 };
             }
         };
@@ -88,12 +122,13 @@ impl BarnacleStore for RedisBarnacleStore {
         // Increment the counter
         let new_count: u32 = match conn.incr(&redis_key, 1).await {
             Ok(count) => count,
-            Err(_) => {
-                // If increment fails, allow the request
+            Err(e) => {
+                // If increment fails, log the error and deny the request for safety
+                eprintln!("Redis increment operation failed: {}", e);
                 return BarnacleResult {
-                    allowed: true,
-                    remaining: config.max_requests - current_count,
-                    retry_after: None,
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
                 };
             }
         };
@@ -105,7 +140,7 @@ impl BarnacleStore for RedisBarnacleStore {
 
         BarnacleResult {
             allowed: true,
-            remaining: config.max_requests - new_count,
+            remaining: config.max_requests.saturating_sub(new_count),
             retry_after: None,
         }
     }

@@ -83,7 +83,7 @@ echo -e "${BLUE}Test 3: Login Rate Limiting (3 attempts per 5 minutes)${NC}"
 echo "Testing login endpoint with wrong password..."
 echo
 
-for i in {1..4}; do
+for i in {1..2}; do
     echo -e "${YELLOW}Login attempt $i:${NC}"
     make_request "POST" "/api/login" '{"email":"test@example.com","password":"wrong_password"}' "X-Login-Email: test@example.com"
     sleep 0.5

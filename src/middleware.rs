@@ -104,9 +104,6 @@ where
 
         Box::pin(async move {
             let key = (key_extractor)(&req).unwrap_or_else(|| {
-                // IP fallback: try ConnectInfo, then X-Forwarded-For, then X-Real-IP, then local fallback
-                println!("Req: {:?}", req);
-
                 // 1. Try ConnectInfo<SocketAddr>
                 if let Some(addr) = req
                     .extensions()
@@ -145,12 +142,8 @@ where
                 BarnacleKey::Ip(local_key)
             });
 
-            println!("Key: {:?}", key);
-
             // Check rate limit
             let result = store.increment(&key, &config).await;
-
-            println!("Result: {:?}\n\n", result);
 
             if !result.allowed {
                 // Return 429 Too Many Requests
