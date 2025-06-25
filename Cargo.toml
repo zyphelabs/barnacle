@@ -15,3 +15,4 @@ anyhow = "1.0"
 tower = { version = "0.5", features = ["util"] }
 tower-layer = "0.3"
 tower-service = "0.3"
+http-body-util = "0.1"

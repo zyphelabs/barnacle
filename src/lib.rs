@@ -1,9 +1,14 @@
 //! Custom rate limiting library with Redis and Axum support
 
 pub mod backoff;
+pub mod key_extractor;
 pub mod middleware;
 pub mod redis_store;
 pub mod types;
+
+// Re-export key items for easier access
+pub use key_extractor::{KeyExtractable, create_generic_rate_limit_layer};
+pub use redis_store::RedisBarnacleStore;
 
 use std::sync::Arc;
 

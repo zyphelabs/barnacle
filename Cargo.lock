@@ -116,6 +116,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "http-body-util",
  "redis",
  "serde",
  "serde_json",
