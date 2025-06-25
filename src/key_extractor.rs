@@ -148,6 +148,12 @@ where
                         return Ok(response);
                     }
 
+                    // Log successful rate limit check for fallback
+                    debug!(
+                        "[GenericRateLimit] Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
+                        fallback_key, result.remaining, result.retry_after
+                    );
+
                     let req = Request::from_parts(parts, axum::body::Body::empty());
                     return inner.call(req).await;
                 }
@@ -186,6 +192,12 @@ where
 
                 return Ok(response);
             }
+
+            // Log successful rate limit check
+            debug!(
+                "[GenericRateLimit] Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
+                rate_limit_key, result.remaining, result.retry_after
+            );
 
             // Reconstruct request with original body
             let new_body = axum::body::Body::from(body_bytes);

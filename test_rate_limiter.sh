@@ -78,8 +78,35 @@ done
 echo -e "${GREEN}Expected: All requests should succeed (200)${NC}"
 echo
 
-# Test 3: Login rate limiting
+# Test 3: Login rate limiting with wrong password until 429 error
 echo -e "${BLUE}Test 3: Login Rate Limiting (3 attempts per 5 minutes)${NC}"
+echo "Testing login endpoint with wrong password..."
+echo
+
+for i in {1..4}; do
+    echo -e "${YELLOW}Login attempt $i:${NC}"
+    make_request "POST" "/api/login" '{"email":"test_fail@example.com","password":"wrong_password"}' "X-Login-Email: test_fail@example.com"
+    sleep 0.5
+done
+
+echo -e "${GREEN}Expected: First 3 attempts should fail (401), 4th should be rate limited (429)${NC}"
+echo
+
+echo "Resetting rate limit for test_fail@example.com..."
+echo
+make_request "POST" "/api/reset/email/test_fail@example.com"
+echo -e "${GREEN}Expected: Should succeed (200)${NC}"
+echo
+
+
+echo -e "${YELLOW}Login attempt afer reset $i:${NC}"
+make_request "POST" "/api/login" '{"email":"test_fail@example.com","password":"wrong_password"}' "X-Login-Email: test_fail@example.com"
+sleep 0.5
+echo -e "${GREEN}Expected: Should succeed request but return unauthorized (401)${NC}"
+echo
+
+# Test 3.1: Login rate limiting with wrong password
+echo -e "${BLUE}Test 3.1: Login Rate Limiting (3 attempts per 5 minutes)${NC}"
 echo "Testing login endpoint with wrong password..."
 echo
 
@@ -89,7 +116,7 @@ for i in {1..2}; do
     sleep 0.5
 done
 
-echo -e "${GREEN}Expected: First 3 attempts should fail (401), 4th should be rate limited (429)${NC}"
+echo -e "${GREEN}Expected: First 2 attempts should fail (401)${NC}"
 echo
 
 # Test 4: Successful login with rate limit reset
