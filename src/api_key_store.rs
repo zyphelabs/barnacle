@@ -1,9 +1,6 @@
 use async_trait::async_trait;
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Connection, Pool};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing;
 
 use crate::types::{ApiKeyValidationResult, BarnacleConfig, StaticApiKeyConfig};
@@ -121,57 +118,6 @@ impl ApiKeyStore for RedisApiKeyStore {
         let config: Option<String> = conn.get(&config_key).await.ok().flatten();
 
         config.and_then(|config_json| serde_json::from_str::<BarnacleConfig>(&config_json).ok())
-    }
-}
-
-/// In-memory API key store for simple setups
-pub struct InMemoryApiKeyStore {
-    keys: Arc<RwLock<HashMap<String, BarnacleConfig>>>,
-    default_config: BarnacleConfig,
-}
-
-impl InMemoryApiKeyStore {
-    pub fn new(default_config: BarnacleConfig) -> Self {
-        Self {
-            keys: Arc::new(RwLock::new(HashMap::new())),
-            default_config,
-        }
-    }
-
-    pub async fn add_key(&self, api_key: String, config: BarnacleConfig) {
-        let mut keys = self.keys.write().await;
-        keys.insert(api_key, config);
-    }
-
-    pub async fn remove_key(&self, api_key: &str) {
-        let mut keys = self.keys.write().await;
-        keys.remove(api_key);
-    }
-
-    pub async fn from_static_config(static_config: StaticApiKeyConfig) -> Self {
-        let store = Self::new(static_config.default_config);
-        let mut keys = store.keys.write().await;
-        *keys = static_config.key_configs;
-        drop(keys);
-        store
-    }
-}
-
-#[async_trait]
-impl ApiKeyStore for InMemoryApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
-        let keys = self.keys.read().await;
-
-        if let Some(config) = keys.get(api_key) {
-            ApiKeyValidationResult::valid_with_config(api_key.to_string(), config.clone())
-        } else {
-            ApiKeyValidationResult::invalid()
-        }
-    }
-
-    async fn get_rate_limit_config(&self, api_key: &str) -> Option<BarnacleConfig> {
-        let keys = self.keys.read().await;
-        keys.get(api_key).cloned()
     }
 }
 
