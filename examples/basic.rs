@@ -9,7 +9,8 @@ use axum::{
     routing::{get, post},
 };
 use barnacle::{
-    BarnacleStore, barnacle_layer, create_generic_rate_limit_layer,
+    BarnacleStore, create_barnacle_layer_for_payload,
+    middleware::create_barnacle_layer,
     types::{BarnacleConfig, BarnacleKey},
 };
 use barnacle::{KeyExtractable, redis_store::RedisBarnacleStore};
@@ -75,10 +76,10 @@ async fn main() {
     };
 
     let login_layer =
-        create_generic_rate_limit_layer::<LoginRequest, _>(store.clone(), login_config.clone());
+        create_barnacle_layer_for_payload::<LoginRequest, _>(store.clone(), login_config.clone());
 
-    let strict_limiter = barnacle_layer(store.clone(), strict_config);
-    let moderate_limiter = barnacle_layer(store.clone(), moderate_config);
+    let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
+    let moderate_limiter = create_barnacle_layer(store.clone(), moderate_config);
 
     let app = Router::new()
         .route("/api/strict", get(strict_endpoint).layer(strict_limiter))

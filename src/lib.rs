@@ -1,13 +1,12 @@
 //! Custom rate limiting library with Redis and Axum support
 
 pub mod backoff;
-pub mod key_extractor;
 pub mod middleware;
 pub mod redis_store;
 pub mod types;
 
 // Re-export key items for easier access
-pub use key_extractor::{KeyExtractable, create_generic_rate_limit_layer};
+pub use middleware::{KeyExtractable, create_barnacle_layer_for_payload};
 pub use redis_store::RedisBarnacleStore;
 
 use std::sync::Arc;
@@ -28,10 +27,6 @@ pub trait BarnacleStore: Send + Sync {
 pub fn barnacle_layer<S: BarnacleStore + 'static>(
     store: Arc<S>,
     config: BarnacleConfig,
-) -> middleware::BarnacleLayer<S> {
-    // Default extractor: always None, so fallback to IP
-    let extractor: std::sync::Arc<
-        dyn Fn(&axum::http::Request<axum::body::Body>) -> Option<BarnacleKey> + Send + Sync,
-    > = std::sync::Arc::new(|_req| None);
-    middleware::BarnacleLayer::new(store, config, extractor)
+) -> middleware::BarnacleLayer<(), S> {
+    middleware::BarnacleLayer::new(store, config)
 }

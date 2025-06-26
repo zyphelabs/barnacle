@@ -6,7 +6,6 @@ use redis::AsyncCommands;
 
 use crate::{
     BarnacleStore,
-    backoff::next_backoff,
     types::{BarnacleConfig, BarnacleKey, BarnacleResult},
 };
 
@@ -27,38 +26,6 @@ impl RedisBarnacleStore {
             BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
             BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
         }
-    }
-
-    fn get_failure_count_key(&self, key: &BarnacleKey) -> String {
-        match key {
-            BarnacleKey::Email(email) => format!("barnacle:failures:email:{}", email),
-            BarnacleKey::ApiKey(api_key) => format!("barnacle:failures:api_key:{}", api_key),
-            BarnacleKey::Ip(ip) => format!("barnacle:failures:ip:{}", ip),
-            BarnacleKey::Custom(custom_data) => format!("barnacle:failures:custom:{}", custom_data),
-        }
-    }
-
-    /// Increment failure count for backoff calculation
-    async fn increment_failure_count(&self, key: &BarnacleKey) -> Result<u32, redis::RedisError> {
-        let failure_key = self.get_failure_count_key(key);
-        let mut conn = self.client.get_async_connection().await?;
-
-        let count: u32 = conn.incr(&failure_key, 1).await?;
-        // Set expiration to prevent indefinite storage (24 hours)
-        let _: () = conn.expire(&failure_key, 86400).await?;
-
-        Ok(count)
-    }
-
-    /// Get current failure count
-    async fn get_failure_count(&self, key: &BarnacleKey) -> u32 {
-        let failure_key = self.get_failure_count_key(key);
-        let mut conn = match self.client.get_async_connection().await {
-            Ok(conn) => conn,
-            Err(_) => return 0,
-        };
-
-        conn.get(&failure_key).await.unwrap_or(0)
     }
 }
 
