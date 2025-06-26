@@ -8,6 +8,7 @@ pub mod types;
 // Re-export key items for easier access
 pub use middleware::{KeyExtractable, create_barnacle_layer_for_payload};
 pub use redis_store::RedisBarnacleStore;
+pub use tracing;
 
 use async_trait::async_trait;
 use types::{BarnacleConfig, BarnacleKey, BarnacleResult};

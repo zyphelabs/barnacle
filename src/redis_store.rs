@@ -3,6 +3,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Connection, Pool};
+use tracing;
 
 use crate::{
     BarnacleStore,
@@ -76,7 +77,7 @@ impl BarnacleStore for RedisBarnacleStore {
             Ok(conn) => conn,
             Err(e) => {
                 // If Redis pool is exhausted or unavailable, log the error and deny the request for safety
-                eprintln!("Redis connection pool error: {}", e);
+                tracing::error!("Redis connection pool error: {}", e);
                 return BarnacleResult {
                     allowed: false,
                     remaining: 0,
@@ -89,7 +90,7 @@ impl BarnacleStore for RedisBarnacleStore {
         let current_count: Option<u32> = match conn.get(&redis_key).await {
             Ok(count) => count,
             Err(e) => {
-                eprintln!("Redis get operation failed: {}", e);
+                tracing::error!("Redis get operation failed: {}", e);
                 return BarnacleResult {
                     allowed: false,
                     remaining: 0,
@@ -101,7 +102,7 @@ impl BarnacleStore for RedisBarnacleStore {
         let ttl: i32 = match conn.ttl(&redis_key).await {
             Ok(ttl) => ttl,
             Err(e) => {
-                eprintln!("Redis TTL operation failed: {}", e);
+                tracing::error!("Redis TTL operation failed: {}", e);
                 return BarnacleResult {
                     allowed: false,
                     remaining: 0,
@@ -134,7 +135,7 @@ impl BarnacleStore for RedisBarnacleStore {
             Ok(count) => count,
             Err(e) => {
                 // If increment fails, log the error and deny the request for safety
-                eprintln!("Redis increment operation failed: {}", e);
+                tracing::error!("Redis increment operation failed: {}", e);
                 return BarnacleResult {
                     allowed: false,
                     remaining: 0,

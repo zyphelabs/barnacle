@@ -15,6 +15,7 @@ use barnacle::{
 };
 use barnacle::{KeyExtractable, redis_store::RedisBarnacleStore};
 use serde::{Deserialize, Serialize};
+use tracing;
 
 impl KeyExtractable for LoginRequest {
     fn extract_key(&self) -> BarnacleKey {
@@ -37,21 +38,15 @@ pub fn init_tracing() {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
 
     // Create Redis store with connection pooling
     let store = Arc::new(
         RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
             .await
-            .expect("Failed to create Redis store with connection pool"),
+            .map_err(|e| format!("Failed to create Redis store with connection pool: {}", e))?,
     );
-
-    // Alternative: Create with custom pool configuration
-    // let store = Arc::new(
-    //     RedisBarnacleStore::with_pool_config("redis://127.0.0.1:6379", 20)
-    //         .expect("Failed to create Redis store with custom pool config")
-    // );
 
     let state = AppState {
         store: store.clone(),
@@ -99,12 +94,14 @@ async fn main() {
         .route("/api/status", get(status_endpoint))
         .with_state(state);
 
-    println!("🚀 Barnacle Rate Limiter Demo Server");
-    println!("Server running on http://localhost:3000");
-    println!("Press Ctrl+C to stop");
+    tracing::info!("🚀 Barnacle Rate Limiter Demo Server");
+    tracing::info!("Server running on http://localhost:3000");
+    tracing::info!("Press Ctrl+C to stop");
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
 }
 
 async fn strict_endpoint(headers: HeaderMap) -> Json<ApiResponse> {
@@ -133,9 +130,10 @@ async fn login_endpoint(
     Json(login_req): Json<LoginRequest>,
 ) -> axum::response::Response {
     // IMPORTANT: The client must send the X-Login-Email header for rate limiting by email to work
-    println!(
+    tracing::debug!(
         "Login request email: {:?}, password: {:?}",
-        login_req.email, login_req.password
+        login_req.email,
+        login_req.password
     );
 
     // First, validate the password

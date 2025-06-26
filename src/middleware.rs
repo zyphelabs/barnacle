@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
+use tracing;
 
 use crate::{
     BarnacleStore,
@@ -154,16 +155,18 @@ where
 
                         let result = store.increment(&fallback_key, &config).await;
                         if !result.allowed {
-                            println!(
-                                "[Barnacle] Rate limit exceeded for fallback key: {:?}",
+                            tracing::warn!(
+                                "Rate limit exceeded for fallback key: {:?}",
                                 fallback_key
                             );
                             return Ok(create_rate_limit_response(result, &config));
                         }
 
-                        println!(
-                            "[Barnacle] Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
-                            fallback_key, result.remaining, result.retry_after
+                        tracing::debug!(
+                            "Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
+                            fallback_key,
+                            result.remaining,
+                            result.retry_after
                         );
 
                         let req = Request::from_parts(parts, axum::body::Body::empty());
@@ -186,17 +189,16 @@ where
             let result = store.increment(&rate_limit_key, &config).await;
 
             if !result.allowed {
-                println!(
-                    "[Barnacle] Rate limit exceeded for key: {:?}",
-                    rate_limit_key
-                );
+                tracing::warn!("Rate limit exceeded for key: {:?}", rate_limit_key);
 
                 return Ok(create_rate_limit_response(result, &config));
             }
 
-            println!(
-                "[Barnacle] Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                rate_limit_key, result.remaining, result.retry_after
+            tracing::debug!(
+                "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
+                rate_limit_key,
+                result.remaining,
+                result.retry_after
             );
 
             // Reconstruct the request
@@ -258,17 +260,16 @@ where
             let result = store.increment(&rate_limit_key, &config).await;
 
             if !result.allowed {
-                println!(
-                    "[Barnacle] Rate limit exceeded for key: {:?}",
-                    rate_limit_key
-                );
+                tracing::warn!("Rate limit exceeded for key: {:?}", rate_limit_key);
 
                 return Ok(create_rate_limit_response(result, &config));
             }
 
-            println!(
-                "[Barnacle] Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                rate_limit_key, result.remaining, result.retry_after
+            tracing::debug!(
+                "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
+                rate_limit_key,
+                result.remaining,
+                result.retry_after
             );
 
             // For () type, we don't need to reconstruct the body
@@ -295,19 +296,18 @@ fn create_rate_limit_response(
     result: crate::types::BarnacleResult,
     config: &BarnacleConfig,
 ) -> Response<Body> {
+    let retry_after = result
+        .retry_after
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|| "60".to_string());
+
     Response::builder()
         .status(429)
-        .header(
-            "Retry-After",
-            result
-                .retry_after
-                .map(|d| d.as_secs().to_string())
-                .unwrap_or_else(|| "60".to_string()),
-        )
+        .header("Retry-After", retry_after)
         .header("X-RateLimit-Remaining", "0")
         .header("X-RateLimit-Limit", config.max_requests.to_string())
         .body(Body::from("Rate limit exceeded"))
-        .unwrap()
+        .expect("Failed to build rate limit response")
 }
 
 /// Helper function to handle rate limit reset logic
@@ -326,21 +326,27 @@ async fn handle_rate_limit_reset<S>(
 
     let key_type = if is_fallback { "fallback key" } else { "key" };
     if !config.is_success_status(status_code) {
-        println!(
-            "[Barnacle] Not resetting rate limit for {} {:?} due to error status: {}",
-            key_type, key, status_code
+        tracing::debug!(
+            "Not resetting rate limit for {} {:?} due to error status: {}",
+            key_type,
+            key,
+            status_code
         );
         return;
     }
 
     match store.reset(key).await {
-        Ok(_) => println!(
-            "[Barnacle] Rate limit reset for {} {:?} after successful request (status: {})",
-            key_type, key, status_code
+        Ok(_) => tracing::info!(
+            "Rate limit reset for {} {:?} after successful request (status: {})",
+            key_type,
+            key,
+            status_code
         ),
-        Err(e) => println!(
-            "[Barnacle] Failed to reset rate limit for {} {:?}: {}",
-            key_type, key, e
+        Err(e) => tracing::error!(
+            "Failed to reset rate limit for {} {:?}: {}",
+            key_type,
+            key,
+            e
         ),
     }
 }
@@ -357,7 +363,7 @@ fn get_fallback_key_common(
 ) -> BarnacleKey {
     // 1. Try ConnectInfo<SocketAddr> (only available in full Request)
     if let Some(addr) = extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>() {
-        println!("[Barnacle] IP via ConnectInfo: {}", addr.ip());
+        tracing::debug!("IP via ConnectInfo: {}", addr.ip());
         return BarnacleKey::Ip(addr.ip().to_string());
     }
 

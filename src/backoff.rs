@@ -28,14 +28,20 @@ pub fn next_backoff(attempt: u32, backoff: &[Duration]) -> Option<Duration> {
 
 /// Gets the appropriate backoff duration for login attempts
 pub fn get_login_backoff(failed_attempts: u32) -> Duration {
-    next_backoff(failed_attempts.saturating_sub(1), DEFAULT_LOGIN_BACKOFF)
-        .unwrap_or(DEFAULT_LOGIN_BACKOFF[DEFAULT_LOGIN_BACKOFF.len() - 1])
+    next_backoff(failed_attempts.saturating_sub(1), DEFAULT_LOGIN_BACKOFF).unwrap_or_else(|| {
+        // This should never happen since DEFAULT_LOGIN_BACKOFF is non-empty
+        // but we provide a fallback for safety
+        DEFAULT_LOGIN_BACKOFF[DEFAULT_LOGIN_BACKOFF.len().saturating_sub(1)]
+    })
 }
 
 /// Gets the appropriate backoff duration for API rate limiting
 pub fn get_api_backoff(violation_count: u32) -> Duration {
-    next_backoff(violation_count.saturating_sub(1), DEFAULT_API_BACKOFF)
-        .unwrap_or(DEFAULT_API_BACKOFF[DEFAULT_API_BACKOFF.len() - 1])
+    next_backoff(violation_count.saturating_sub(1), DEFAULT_API_BACKOFF).unwrap_or_else(|| {
+        // This should never happen since DEFAULT_API_BACKOFF is non-empty
+        // but we provide a fallback for safety
+        DEFAULT_API_BACKOFF[DEFAULT_API_BACKOFF.len().saturating_sub(1)]
+    })
 }
 
 /// Creates a custom backoff sequence
