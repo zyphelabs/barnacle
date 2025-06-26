@@ -11,7 +11,7 @@ use axum::{
 use barnacle::{
     BarnacleStore, create_barnacle_layer_for_payload,
     middleware::create_barnacle_layer,
-    types::{BarnacleConfig, BarnacleKey},
+    types::{BarnacleConfig, BarnacleKey, ResetOnSuccess},
 };
 use barnacle::{KeyExtractable, redis_store::RedisBarnacleStore};
 use serde::{Deserialize, Serialize};
@@ -56,25 +56,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let strict_config = BarnacleConfig {
         max_requests: 5,
         window: Duration::from_secs(60),
-        backoff: None,
-        reset_on_success: false,
-        success_status_codes: None,
+        reset_on_success: ResetOnSuccess::Not,
     };
 
     let moderate_config = BarnacleConfig {
         max_requests: 20,
         window: Duration::from_secs(60),
-        backoff: None,
-        reset_on_success: false,
-        success_status_codes: None,
+        reset_on_success: ResetOnSuccess::Not,
     };
 
     let login_config = BarnacleConfig {
         max_requests: 3,
         window: Duration::from_secs(20),
-        backoff: None,
-        reset_on_success: true,
-        success_status_codes: Some(vec![200]),
+        reset_on_success: ResetOnSuccess::Yes(Some(vec![200])),
     };
 
     let login_layer =
