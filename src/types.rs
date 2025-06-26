@@ -42,6 +42,7 @@ pub enum BarnacleKey {
     Email(String),
     ApiKey(String),
     Ip(String),
+    Custom(String),
 }
 
 /// Result of an increment attempt

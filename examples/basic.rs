@@ -9,11 +9,13 @@ use axum::{
     routing::{get, post},
 };
 use barnacle::{
-    BarnacleStore, barnacle_layer, create_generic_rate_limit_layer,
+    BarnacleStore, create_barnacle_layer_for_payload,
+    middleware::create_barnacle_layer,
     types::{BarnacleConfig, BarnacleKey},
 };
 use barnacle::{KeyExtractable, redis_store::RedisBarnacleStore};
 use serde::{Deserialize, Serialize};
+use tracing;
 
 impl KeyExtractable for LoginRequest {
     fn extract_key(&self) -> BarnacleKey {
@@ -36,15 +38,16 @@ pub fn init_tracing() {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
 
-    let redis_client = Arc::new(
-        redis::Client::open("redis://127.0.0.1:6379").expect("Failed to connect to Redis"),
+    // Create Redis store with connection pooling
+    let store = Arc::new(
+        RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
+            .await
+            .map_err(|e| format!("Failed to create Redis store with connection pool: {}", e))?,
     );
 
-    // Create Redis store
-    let store = Arc::new(RedisBarnacleStore::new(redis_client));
     let state = AppState {
         store: store.clone(),
     };
@@ -75,10 +78,10 @@ async fn main() {
     };
 
     let login_layer =
-        create_generic_rate_limit_layer::<LoginRequest, _>(store.clone(), login_config.clone());
+        create_barnacle_layer_for_payload::<LoginRequest>(store.clone(), login_config.clone());
 
-    let strict_limiter = barnacle_layer(store.clone(), strict_config);
-    let moderate_limiter = barnacle_layer(store.clone(), moderate_config);
+    let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
+    let moderate_limiter = create_barnacle_layer(store.clone(), moderate_config);
 
     let app = Router::new()
         .route("/api/strict", get(strict_endpoint).layer(strict_limiter))
@@ -91,12 +94,14 @@ async fn main() {
         .route("/api/status", get(status_endpoint))
         .with_state(state);
 
-    println!("🚀 Barnacle Rate Limiter Demo Server");
-    println!("Server running on http://localhost:3000");
-    println!("Press Ctrl+C to stop");
+    tracing::info!("🚀 Barnacle Rate Limiter Demo Server");
+    tracing::info!("Server running on http://localhost:3000");
+    tracing::info!("Press Ctrl+C to stop");
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
 }
 
 async fn strict_endpoint(headers: HeaderMap) -> Json<ApiResponse> {
@@ -125,9 +130,10 @@ async fn login_endpoint(
     Json(login_req): Json<LoginRequest>,
 ) -> axum::response::Response {
     // IMPORTANT: The client must send the X-Login-Email header for rate limiting by email to work
-    println!(
+    tracing::debug!(
         "Login request email: {:?}, password: {:?}",
-        login_req.email, login_req.password
+        login_req.email,
+        login_req.password
     );
 
     // First, validate the password
