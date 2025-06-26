@@ -214,16 +214,39 @@ where
 
             let response = inner.call(new_req).await?;
 
+            // Add rate limit headers to successful response
+            let mut response_with_headers = response;
+            let headers = response_with_headers.headers_mut();
+
+            tracing::debug!(
+                "Adding rate limit headers - remaining: {}, limit: {}",
+                result.remaining,
+                config.max_requests
+            );
+
+            if let Ok(remaining_header) = result.remaining.to_string().parse() {
+                headers.insert("X-RateLimit-Remaining", remaining_header);
+            }
+            if let Ok(limit_header) = config.max_requests.to_string().parse() {
+                headers.insert("X-RateLimit-Limit", limit_header);
+            }
+            if let Some(retry_after) = result.retry_after {
+                if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
+                    headers.insert("X-RateLimit-Reset", reset_header);
+                    tracing::debug!("Added X-RateLimit-Reset: {}", retry_after.as_secs());
+                }
+            }
+
             handle_rate_limit_reset(
                 &store,
                 &config,
                 &rate_limit_key,
-                response.status().as_u16(),
+                response_with_headers.status().as_u16(),
                 false,
             )
             .await;
 
-            Ok(response)
+            Ok(response_with_headers)
         })
     }
 }
@@ -278,16 +301,39 @@ where
 
             let response = inner.call(new_req).await?;
 
+            // Add rate limit headers to successful response
+            let mut response_with_headers = response;
+            let headers = response_with_headers.headers_mut();
+
+            tracing::debug!(
+                "Adding rate limit headers - remaining: {}, limit: {}",
+                result.remaining,
+                config.max_requests
+            );
+
+            if let Ok(remaining_header) = result.remaining.to_string().parse() {
+                headers.insert("X-RateLimit-Remaining", remaining_header);
+            }
+            if let Ok(limit_header) = config.max_requests.to_string().parse() {
+                headers.insert("X-RateLimit-Limit", limit_header);
+            }
+            if let Some(retry_after) = result.retry_after {
+                if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
+                    headers.insert("X-RateLimit-Reset", reset_header);
+                    tracing::debug!("Added X-RateLimit-Reset: {}", retry_after.as_secs());
+                }
+            }
+
             handle_rate_limit_reset(
                 &store,
                 &config,
                 &rate_limit_key,
-                response.status().as_u16(),
+                response_with_headers.status().as_u16(),
                 false,
             )
             .await;
 
-            Ok(response)
+            Ok(response_with_headers)
         })
     }
 }

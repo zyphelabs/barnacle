@@ -163,8 +163,20 @@ where
                     rate_limit_result.remaining
                 );
 
-                // Continue to the inner service
-                let response = inner.call(req).await?;
+                let mut response = inner.call(req).await?;
+
+                let headers = response.headers_mut();
+                if let Ok(remaining_header) = rate_limit_result.remaining.to_string().parse() {
+                    headers.insert("X-RateLimit-Remaining", remaining_header);
+                }
+                if let Ok(limit_header) = rate_limit_config.max_requests.to_string().parse() {
+                    headers.insert("X-RateLimit-Limit", limit_header);
+                }
+                if let Some(retry_after) = rate_limit_result.retry_after {
+                    if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
+                        headers.insert("X-RateLimit-Reset", reset_header);
+                    }
+                }
 
                 // Handle rate limit reset on success if configured
                 handle_rate_limit_reset(
