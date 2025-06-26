@@ -185,10 +185,12 @@ where
 }
 
 fn extract_api_key(headers: &HeaderMap, header_name: &str) -> Option<String> {
-    headers
-        .get(header_name)
-        .and_then(|value| value.to_str().ok())
-        .map(|s| s.to_string())
+    for (name, value) in headers.iter() {
+        if name.as_str().eq_ignore_ascii_case(header_name) {
+            return value.to_str().ok().map(|s| s.to_string());
+        }
+    }
+    None
 }
 
 fn create_unauthorized_response(message: &str) -> Response<Body> {
