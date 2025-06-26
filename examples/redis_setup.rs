@@ -3,7 +3,7 @@ use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Config, Pool, Runtime};
 use serde_json;
 use std::time::Duration;
-use tracing::{Level, error, info};
+use tracing::{Level, info};
 use tracing_subscriber;
 
 #[tokio::main]

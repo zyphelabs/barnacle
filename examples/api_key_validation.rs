@@ -1,7 +1,8 @@
 use axum::{
     Router,
+    extract::State,
     response::{IntoResponse, Json},
-    routing::get,
+    routing::{get, post},
 };
 use barnacle::{
     ApiKeyMiddlewareConfig, BarnacleConfig, BarnacleKey, BarnacleResult, BarnacleStore,
@@ -14,6 +15,12 @@ use tokio::net::TcpListener;
 use tracing::{Level, info};
 use tracing_subscriber;
 
+// App state to hold the rate limiter for reset functionality
+#[derive(Clone)]
+struct AppState {
+    rate_limiter: Arc<SimpleRateLimiter>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
@@ -23,37 +30,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compact()
         .init();
 
-    info!("🧪 Starting Rate Limit Test Server...");
-    info!("====================================");
+    info!("🔐 API Key Validation & Rate Limiting Demo Server");
+    info!("================================================");
 
-    // Create API key configurations with VERY LOW limits for easy testing
+    // Create API key configurations with different rate limits for testing
     let static_config = StaticApiKeyConfig::new(BarnacleConfig {
-        max_requests: 2,                 // Default: apenas 2 requests
-        window: Duration::from_secs(30), // Em 30 segundos
+        max_requests: 5,                 // Default: 5 requests
+        window: Duration::from_secs(60), // In 60 seconds
         reset_on_success: ResetOnSuccess::Not,
     })
     .with_key_config(
-        "test_low_limit".to_string(),
+        "premium_key".to_string(),
         BarnacleConfig {
-            max_requests: 3,                 // Apenas 3 requests
-            window: Duration::from_secs(20), // Em 20 segundos
+            max_requests: 10,                // Premium: 10 requests
+            window: Duration::from_secs(60), // In 60 seconds
             reset_on_success: ResetOnSuccess::Not,
         },
     )
     .with_key_config(
-        "test_very_low".to_string(),
+        "basic_key".to_string(),
         BarnacleConfig {
-            max_requests: 1,                 // Apenas 1 request!
-            window: Duration::from_secs(10), // Em 10 segundos
+            max_requests: 3,                 // Basic: 3 requests
+            window: Duration::from_secs(60), // In 60 seconds
             reset_on_success: ResetOnSuccess::Not,
         },
     )
     .with_key_config(
-        "test_reset_on_success".to_string(),
+        "strict_key".to_string(),
         BarnacleConfig {
-            max_requests: 2,
-            window: Duration::from_secs(60),
-            reset_on_success: ResetOnSuccess::Yes(None), // Reset no sucesso
+            max_requests: 2,                 // Strict: 2 requests
+            window: Duration::from_secs(30), // In 30 seconds
+            reset_on_success: ResetOnSuccess::Not,
         },
     );
 
@@ -66,41 +73,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key_config = ApiKeyMiddlewareConfig {
         header_name: "x-api-key".to_string(),
         default_rate_limit: BarnacleConfig {
-            max_requests: 2,
-            window: Duration::from_secs(30),
+            max_requests: 5,
+            window: Duration::from_secs(60),
             reset_on_success: ResetOnSuccess::Not,
         },
-        require_api_key: true, // API key obrigatória
+        require_api_key: true, // API key required
     };
 
     // Create middleware
-    let middleware = create_api_key_layer_with_config(static_store, rate_limiter, api_key_config);
+    let middleware =
+        create_api_key_layer_with_config(static_store, rate_limiter.clone(), api_key_config);
+
+    let state = AppState {
+        rate_limiter: rate_limiter.clone(),
+    };
 
     // Create the application
     let app = Router::new()
-        .route("/test", get(test_handler))
+        .route("/api/data", get(data_handler))
+        .route("/api/status", get(status_handler))
+        .route("/api/reset/:api_key", post(reset_rate_limit))
         .layer(middleware)
-        .route("/health", get(health_handler));
+        .route("/health", get(health_handler))
+        .with_state(state);
 
     info!("🎯 Server started on http://localhost:3000");
     info!("");
-    info!("🔑 API Keys configuradas para teste:");
-    info!("  test_low_limit     → 3 requests/20s");
-    info!("  test_very_low      → 1 request/10s");
-    info!("  test_reset_on_success → 2 requests/60s (reset on 2xx)");
+    info!("🔑 API Keys configured for testing:");
+    info!("  premium_key  → 10 requests/60s");
+    info!("  basic_key    → 3 requests/60s");
+    info!("  strict_key   → 2 requests/30s");
+    info!("  (default)    → 5 requests/60s");
     info!("");
-    info!("🧪 Comandos de teste:");
-    info!("  # Test API key denial:");
-    info!("  curl http://localhost:3000/test  # Sem API key → 401");
-    info!("  curl -H 'x-api-key: invalid' http://localhost:3000/test  # Key inválida → 401");
+    info!("🧪 Test Scenarios:");
+    info!("  1. Missing API key → 401 Unauthorized");
+    info!("  2. Invalid API key → 401 Unauthorized");
+    info!("  3. Rate limit exceeded → 429 Too Many Requests");
+    info!("");
+    info!("📝 Test Commands:");
+    info!("  # Test missing API key:");
+    info!("  curl http://localhost:3000/api/data");
+    info!("");
+    info!("  # Test invalid API key:");
+    info!("  curl -H 'x-api-key: invalid_key' http://localhost:3000/api/data");
     info!("");
     info!("  # Test rate limiting:");
-    info!("  curl -H 'x-api-key: test_very_low' http://localhost:3000/test  # 1º: OK");
-    info!("  curl -H 'x-api-key: test_very_low' http://localhost:3000/test  # 2º: 429");
+    info!("  curl -H 'x-api-key: strict_key' http://localhost:3000/api/data");
+    info!("  curl -H 'x-api-key: strict_key' http://localhost:3000/api/data");
+    info!("  curl -H 'x-api-key: strict_key' http://localhost:3000/api/data  # Should fail");
     info!("");
-    info!("  # Teste automatizado:");
-    info!("  ./test_api_key_denial.sh");
-    info!("  ./test_rate_limit_denial.sh");
+    info!("  # Reset rate limit for testing:");
+    info!("  curl -X POST http://localhost:3000/api/reset/strict_key");
+    info!("");
+    info!("  # Run automated tests:");
+    info!("  ./test_api_key_scenarios.sh");
 
     let listener = TcpListener::bind("127.0.0.1:3000").await?;
     axum::serve(listener, app).await?;
@@ -108,18 +134,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn test_handler() -> impl IntoResponse {
+async fn data_handler() -> impl IntoResponse {
     Json(json!({
-        "message": "Request aceito!",
+        "message": "Data endpoint accessed successfully!",
         "timestamp": chrono::Utc::now().to_rfc3339(),
-        "status": "success"
+        "status": "success",
+        "data": {
+            "id": 12345,
+            "name": "Sample Data",
+            "description": "This is protected data that requires a valid API key"
+        }
     }))
+}
+
+async fn status_handler() -> impl IntoResponse {
+    Json(json!({
+        "message": "Status endpoint accessed successfully!",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "status": "success",
+        "service": "API Key Validation Demo"
+    }))
+}
+
+async fn reset_rate_limit(
+    State(state): State<AppState>,
+    axum::extract::Path(api_key): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let key = BarnacleKey::ApiKey(api_key.clone());
+
+    match state.rate_limiter.reset(&key).await {
+        Ok(_) => Json(json!({
+            "message": format!("Rate limit reset for API key: {}", api_key),
+            "status": "success",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })),
+        Err(_) => Json(json!({
+            "message": format!("Failed to reset rate limit for API key: {}", api_key),
+            "status": "error",
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })),
+    }
 }
 
 async fn health_handler() -> impl IntoResponse {
     Json(json!({
         "status": "healthy",
-        "timestamp": chrono::Utc::now().to_rfc3339()
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "service": "API Key Validation Demo"
     }))
 }
 

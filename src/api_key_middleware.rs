@@ -1,15 +1,13 @@
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::{HeaderMap, Response, StatusCode};
-use axum::response::IntoResponse;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 use tracing;
 
 use crate::api_key_store::ApiKeyStore;
-use crate::types::{ApiKeyMiddlewareConfig, ApiKeyValidationResult, BarnacleKey};
+use crate::types::{ApiKeyMiddlewareConfig, BarnacleKey};
 use crate::{BarnacleConfig, BarnacleStore};
 
 /// Layer for API key validation and rate limiting
