@@ -9,11 +9,9 @@ use axum::{
     routing::{get, post},
 };
 use barnacle::{
-    BarnacleStore, create_barnacle_layer_for_payload,
-    middleware::create_barnacle_layer,
-    types::{BarnacleConfig, BarnacleKey, ResetOnSuccess},
+    BarnacleConfig, BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
+    create_barnacle_layer, create_barnacle_layer_for_payload,
 };
-use barnacle::{KeyExtractable, redis_store::RedisBarnacleStore};
 use serde::{Deserialize, Serialize};
 use tracing;
 
