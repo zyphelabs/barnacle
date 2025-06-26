@@ -1,13 +1,14 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ResetOnSuccess {
     Not,
     Yes(Option<Vec<u16>>),
 }
 
 /// Rate limiter configuration
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BarnacleConfig {
     pub max_requests: u32,
     pub window: Duration,
@@ -56,4 +57,83 @@ pub struct BarnacleResult {
     pub allowed: bool,
     pub remaining: u32,
     pub retry_after: Option<Duration>,
+}
+
+/// API key validation result
+#[derive(Clone, Debug)]
+pub struct ApiKeyValidationResult {
+    pub valid: bool,
+    pub key_id: Option<String>,
+    pub rate_limit_config: Option<BarnacleConfig>,
+}
+
+impl ApiKeyValidationResult {
+    pub fn valid_with_config(key_id: String, config: BarnacleConfig) -> Self {
+        Self {
+            valid: true,
+            key_id: Some(key_id),
+            rate_limit_config: Some(config),
+        }
+    }
+
+    pub fn valid_with_default_config(key_id: String) -> Self {
+        Self {
+            valid: true,
+            key_id: Some(key_id),
+            rate_limit_config: Some(BarnacleConfig::default()),
+        }
+    }
+
+    pub fn invalid() -> Self {
+        Self {
+            valid: false,
+            key_id: None,
+            rate_limit_config: None,
+        }
+    }
+}
+
+/// Configuration for API key middleware
+#[derive(Clone, Debug)]
+pub struct ApiKeyMiddlewareConfig {
+    pub header_name: String,
+    pub default_rate_limit: BarnacleConfig,
+    pub require_api_key: bool,
+}
+
+impl Default for ApiKeyMiddlewareConfig {
+    fn default() -> Self {
+        Self {
+            header_name: "x-api-key".to_string(),
+            default_rate_limit: BarnacleConfig::default(),
+            require_api_key: true,
+        }
+    }
+}
+
+/// Per-key rate limiting configuration for static configurations
+#[derive(Clone, Debug)]
+pub struct StaticApiKeyConfig {
+    pub key_configs: HashMap<String, BarnacleConfig>,
+    pub default_config: BarnacleConfig,
+}
+
+impl StaticApiKeyConfig {
+    pub fn new(default_config: BarnacleConfig) -> Self {
+        Self {
+            key_configs: HashMap::new(),
+            default_config,
+        }
+    }
+
+    pub fn with_key_config(mut self, api_key: String, config: BarnacleConfig) -> Self {
+        self.key_configs.insert(api_key, config);
+        self
+    }
+
+    pub fn get_config_for_key(&self, api_key: &str) -> &BarnacleConfig {
+        self.key_configs
+            .get(api_key)
+            .unwrap_or(&self.default_config)
+    }
 }
