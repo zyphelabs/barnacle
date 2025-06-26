@@ -76,7 +76,7 @@ async fn main() {
     };
 
     let login_layer =
-        create_barnacle_layer_for_payload::<LoginRequest, _>(store.clone(), login_config.clone());
+        create_barnacle_layer_for_payload::<LoginRequest>(store.clone(), login_config.clone());
 
     let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
     let moderate_limiter = create_barnacle_layer(store.clone(), moderate_config);

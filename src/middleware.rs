@@ -388,21 +388,20 @@ fn get_fallback_key_common(
 }
 
 /// Helper function to create the barnacle layer for payload-based key extraction
-pub fn create_barnacle_layer_for_payload<T, S>(
-    store: Arc<S>,
+pub fn create_barnacle_layer_for_payload<T>(
+    store: Arc<impl BarnacleStore + 'static>,
     config: BarnacleConfig,
-) -> BarnacleLayer<T, S>
+) -> BarnacleLayer<T, impl BarnacleStore + 'static>
 where
     T: DeserializeOwned + KeyExtractable + Send + 'static,
-    S: BarnacleStore + 'static,
 {
     BarnacleLayer::new(store, config)
 }
 
 /// Helper function to create the barnacle layer without payload deserialization
-pub fn create_barnacle_layer<S>(store: Arc<S>, config: BarnacleConfig) -> BarnacleLayer<(), S>
-where
-    S: BarnacleStore + 'static,
-{
+pub fn create_barnacle_layer(
+    store: Arc<impl BarnacleStore + 'static>,
+    config: BarnacleConfig,
+) -> BarnacleLayer<(), impl BarnacleStore + 'static> {
     BarnacleLayer::new(store, config)
 }
