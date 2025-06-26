@@ -11,7 +11,7 @@ use axum::{
 use barnacle::{
     BarnacleStore, create_barnacle_layer_for_payload,
     middleware::create_barnacle_layer,
-    types::{BarnacleConfig, BarnacleKey},
+    types::{BarnacleConfig, BarnacleKey, FallbackKeyConfig, FallbackKeyExtractor},
 };
 use barnacle::{KeyExtractable, redis_store::RedisBarnacleStore};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backoff: None,
         reset_on_success: false,
         success_status_codes: None,
+        fallback_key_config: barnacle::types::FallbackKeyConfig {
+            use_ip_fallback: true, // Enable IP-based fallback for strict endpoints
+            custom_extractor: None,
+        },
     };
 
     let moderate_config = BarnacleConfig {
@@ -67,6 +71,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backoff: None,
         reset_on_success: false,
         success_status_codes: None,
+        fallback_key_config: barnacle::types::FallbackKeyConfig {
+            use_ip_fallback: false, // Disable IP-based fallback for moderate endpoints
+            custom_extractor: None,
+        },
     };
 
     let login_config = BarnacleConfig {
@@ -75,6 +83,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         backoff: None,
         reset_on_success: true,
         success_status_codes: Some(vec![200]),
+        fallback_key_config: barnacle::types::FallbackKeyConfig {
+            use_ip_fallback: false, // Disable IP-based fallback for login (should use email from body)
+            custom_extractor: None,
+        },
+    };
+
+    // Example with custom fallback key extractor
+    let api_config = BarnacleConfig {
+        max_requests: 10,
+        window: Duration::from_secs(60),
+        backoff: None,
+        reset_on_success: false,
+        success_status_codes: None,
+        fallback_key_config: FallbackKeyConfig {
+            use_ip_fallback: false,
+            custom_extractor: Some(Arc::new(ApiKeyFallbackExtractor)),
+        },
     };
 
     let login_layer =
@@ -82,6 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
     let moderate_limiter = create_barnacle_layer(store.clone(), moderate_config);
+    let api_limiter = create_barnacle_layer(store.clone(), api_config);
 
     let app = Router::new()
         .route("/api/strict", get(strict_endpoint).layer(strict_limiter))
@@ -90,6 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(moderate_endpoint).layer(moderate_limiter),
         )
         .route("/api/login", post(login_endpoint).layer(login_layer))
+        .route(
+            "/api/custom-fallback",
+            get(custom_fallback_endpoint).layer(api_limiter),
+        )
         .route("/api/reset/{:key_type}/{:value}", post(reset_rate_limit))
         .route("/api/status", get(status_endpoint))
         .with_state(state);
@@ -186,6 +216,16 @@ async fn status_endpoint(headers: HeaderMap) -> Json<ApiResponse> {
     })
 }
 
+async fn custom_fallback_endpoint(headers: HeaderMap) -> Json<ApiResponse> {
+    let rate_limit_info = extract_rate_limit_info(&headers);
+
+    Json(ApiResponse {
+        message: "This endpoint uses a custom fallback key extractor that tries API key from Authorization header first, then falls back to IP.".to_string(),
+        remaining_requests: rate_limit_info.as_ref().map(|info| info.remaining),
+        rate_limit_info,
+    })
+}
+
 #[derive(Serialize, Deserialize)]
 struct ApiResponse {
     message: String,
@@ -242,4 +282,65 @@ fn extract_rate_limit_info(headers: &HeaderMap) -> Option<RateLimitInfo> {
         limit,
         reset_after,
     })
+}
+
+// Custom fallback key extractor that uses API key from headers
+struct ApiKeyFallbackExtractor;
+
+impl FallbackKeyExtractor for ApiKeyFallbackExtractor {
+    fn extract_key(&self, parts: &axum::http::request::Parts) -> BarnacleKey {
+        // Try to extract API key from Authorization header
+        if let Some(auth_header) = parts.headers.get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                if auth_str.starts_with("Bearer ") {
+                    let api_key = auth_str[7..].to_string();
+                    if !api_key.is_empty() {
+                        return BarnacleKey::ApiKey(api_key);
+                    }
+                }
+            }
+        }
+
+        // Fallback to IP-based key if no API key found
+        get_fallback_key_common(&parts.extensions, &parts.headers, &parts.uri, &parts.method)
+    }
+}
+
+// Helper function to get fallback key (copied from middleware for demo purposes)
+fn get_fallback_key_common(
+    extensions: &axum::http::Extensions,
+    headers: &axum::http::HeaderMap,
+    uri: &axum::http::Uri,
+    method: &axum::http::Method,
+) -> BarnacleKey {
+    // 1. Try ConnectInfo<SocketAddr> (only available in full Request)
+    if let Some(addr) = extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>() {
+        tracing::debug!("IP via ConnectInfo: {}", addr.ip());
+        return BarnacleKey::Ip(addr.ip().to_string());
+    }
+
+    // 2. Try X-Forwarded-For header
+    if let Some(forwarded) = headers.get("x-forwarded-for") {
+        if let Ok(forwarded) = forwarded.to_str() {
+            let ip = forwarded.split(',').next().unwrap_or("").trim();
+            if !ip.is_empty() && ip != "unknown" {
+                return BarnacleKey::Ip(ip.to_string());
+            }
+        }
+    }
+
+    // 3. Try X-Real-IP header
+    if let Some(real_ip) = headers.get("x-real-ip") {
+        if let Ok(real_ip) = real_ip.to_str() {
+            if !real_ip.is_empty() && real_ip != "unknown" {
+                return BarnacleKey::Ip(real_ip.to_string());
+            }
+        }
+    }
+
+    // 4. For local requests, use a unique identifier based on route + method
+    let path = uri.path();
+    let method_str = method.as_str();
+    let local_key = format!("local:{}:{}", method_str, path);
+    BarnacleKey::Ip(local_key)
 }

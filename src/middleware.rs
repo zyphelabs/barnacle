@@ -147,11 +147,13 @@ where
                         if let Ok(payload) = serde_json::from_slice::<T>(&bytes) {
                             (payload.extract_key(), Some(bytes))
                         } else {
-                            (get_fallback_key_from_parts(&parts), Some(bytes))
+                            // Use configurable fallback key extraction
+                            (get_configurable_fallback_key(&parts, &config), Some(bytes))
                         }
                     }
                     Err(_) => {
-                        let fallback_key = get_fallback_key_from_parts(&parts);
+                        // Use configurable fallback key extraction
+                        let fallback_key = get_configurable_fallback_key(&parts, &config);
 
                         let result = store.increment(&fallback_key, &config).await;
                         if !result.allowed {
@@ -391,6 +393,32 @@ fn get_fallback_key_common(
     let method_str = method.as_str();
     let local_key = format!("local:{}:{}", method_str, path);
     BarnacleKey::Ip(local_key)
+}
+
+fn get_configurable_fallback_key(
+    parts: &axum::http::request::Parts,
+    config: &BarnacleConfig,
+) -> BarnacleKey {
+    // First, try custom extractor if configured
+    if let Some(ref custom_extractor) = config.fallback_key_config.custom_extractor {
+        return custom_extractor.extract_key(parts);
+    }
+
+    // Then, use IP-based fallback if enabled
+    if config.fallback_key_config.use_ip_fallback {
+        return get_fallback_key_common(
+            &parts.extensions,
+            &parts.headers,
+            &parts.uri,
+            &parts.method,
+        );
+    }
+
+    // Default: use a generic key based on method and path
+    let path = parts.uri.path();
+    let method_str = parts.method.as_str();
+    let generic_key = format!("generic:{}:{}", method_str, path);
+    BarnacleKey::Custom(generic_key)
 }
 
 /// Helper function to create the barnacle layer for payload-based key extraction
