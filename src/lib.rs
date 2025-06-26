@@ -1,17 +1,17 @@
 //! Custom rate limiting library with Redis and Axum support
 
-pub mod backoff;
-pub mod middleware;
-pub mod redis_store;
-pub mod types;
+mod backoff;
+mod middleware;
+mod redis_store;
+mod types;
 
 // Re-export key items for easier access
-pub use middleware::{KeyExtractable, create_barnacle_layer_for_payload};
+pub use middleware::{KeyExtractable, create_barnacle_layer, create_barnacle_layer_for_payload};
 pub use redis_store::RedisBarnacleStore;
 pub use tracing;
+pub use types::{BarnacleConfig, BarnacleKey, BarnacleResult, ResetOnSuccess};
 
 use async_trait::async_trait;
-use types::{BarnacleConfig, BarnacleKey, BarnacleResult};
 
 /// Trait to abstract the rate limiter storage backend (e.g., Redis)
 #[async_trait]

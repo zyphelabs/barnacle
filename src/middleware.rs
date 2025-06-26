@@ -9,6 +9,7 @@ use std::task::{Context, Poll};
 use tower::{Layer, Service};
 use tracing;
 
+use crate::types::ResetOnSuccess;
 use crate::{
     BarnacleStore,
     types::{BarnacleConfig, BarnacleKey},
@@ -320,7 +321,7 @@ async fn handle_rate_limit_reset<S>(
 ) where
     S: BarnacleStore + 'static,
 {
-    if !config.reset_on_success {
+    if config.reset_on_success == ResetOnSuccess::Not {
         return;
     }
 
