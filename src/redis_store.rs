@@ -1,22 +1,58 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use redis::AsyncCommands;
+use deadpool_redis::redis::AsyncCommands;
+use deadpool_redis::{Connection, Pool};
 
 use crate::{
     BarnacleStore,
     types::{BarnacleConfig, BarnacleKey, BarnacleResult},
 };
 
-/// Implementation of BarnacleStore using Redis
+/// Implementation of BarnacleStore using Redis with connection pooling
 pub struct RedisBarnacleStore {
-    pub client: Arc<redis::Client>,
+    pool: Pool,
 }
 
 impl RedisBarnacleStore {
-    pub fn new(client: Arc<redis::Client>) -> Self {
-        Self { client }
+    /// Create a new Redis store with connection pooling
+    pub fn new(pool: Pool) -> Self {
+        Self { pool }
+    }
+
+    /// Create a new Redis store from a Redis URL
+    pub async fn from_url(url: &str) -> Result<Self, deadpool_redis::PoolError> {
+        let cfg = deadpool_redis::Config::from_url(url);
+        let pool = cfg
+            .create_pool(Some(deadpool_redis::Runtime::Tokio1))
+            .map_err(|e| {
+                deadpool_redis::PoolError::Backend(deadpool_redis::redis::RedisError::from(
+                    std::io::Error::new(std::io::ErrorKind::Other, e),
+                ))
+            })?;
+        Ok(Self::new(pool))
+    }
+
+    /// Create a new Redis store with custom pool configuration
+    pub fn with_pool_config(url: &str, max_size: usize) -> Result<Self, deadpool_redis::PoolError> {
+        let mut cfg = deadpool_redis::Config::from_url(url);
+        cfg.pool = Some(deadpool_redis::PoolConfig {
+            max_size,
+            ..Default::default()
+        });
+        let pool = cfg
+            .create_pool(Some(deadpool_redis::Runtime::Tokio1))
+            .map_err(|e| {
+                deadpool_redis::PoolError::Backend(deadpool_redis::redis::RedisError::from(
+                    std::io::Error::new(std::io::ErrorKind::Other, e),
+                ))
+            })?;
+        Ok(Self::new(pool))
+    }
+
+    /// Get a connection from the pool
+    async fn get_connection(&self) -> Result<Connection, deadpool_redis::PoolError> {
+        self.pool.get().await
     }
 
     fn get_redis_key(&self, key: &BarnacleKey) -> String {
@@ -35,12 +71,12 @@ impl BarnacleStore for RedisBarnacleStore {
         let redis_key = self.get_redis_key(key);
         let window_seconds = config.window.as_secs() as usize;
 
-        // Get Redis connection
-        let mut conn = match self.client.get_async_connection().await {
+        // Get Redis connection from pool
+        let mut conn = match self.get_connection().await {
             Ok(conn) => conn,
             Err(e) => {
-                // If Redis is unavailable, log the error and deny the request for safety
-                eprintln!("Redis connection failed: {}", e);
+                // If Redis pool is exhausted or unavailable, log the error and deny the request for safety
+                eprintln!("Redis connection pool error: {}", e);
                 return BarnacleResult {
                     allowed: false,
                     remaining: 0,
@@ -49,18 +85,23 @@ impl BarnacleStore for RedisBarnacleStore {
             }
         };
 
-        // Use Redis MULTI/EXEC for atomic operations
-        let (current_count, ttl): (Option<u32>, Option<u32>) = match redis::pipe()
-            .atomic()
-            .get(&redis_key)
-            .ttl(&redis_key)
-            .query_async(&mut conn)
-            .await
-        {
-            Ok(result) => result,
+        // Get current count and TTL using individual commands
+        let current_count: Option<u32> = match conn.get(&redis_key).await {
+            Ok(count) => count,
             Err(e) => {
-                // If Redis operation fails, log the error and deny the request for safety
-                eprintln!("Redis pipeline operation failed: {}", e);
+                eprintln!("Redis get operation failed: {}", e);
+                return BarnacleResult {
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
+                };
+            }
+        };
+
+        let ttl: i32 = match conn.ttl(&redis_key).await {
+            Ok(ttl) => ttl,
+            Err(e) => {
+                eprintln!("Redis TTL operation failed: {}", e);
                 return BarnacleResult {
                     allowed: false,
                     remaining: 0,
@@ -70,7 +111,7 @@ impl BarnacleStore for RedisBarnacleStore {
         };
 
         let current_count = current_count.unwrap_or(0);
-        let ttl = ttl.unwrap_or(0);
+        let ttl = ttl.max(0) as u32;
 
         // Check if we're within the rate limit
         if current_count >= config.max_requests {
@@ -117,7 +158,7 @@ impl BarnacleStore for RedisBarnacleStore {
     async fn reset(&self, key: &BarnacleKey) -> anyhow::Result<()> {
         let redis_key = self.get_redis_key(key);
 
-        let mut conn = self.client.get_async_connection().await?;
+        let mut conn = self.get_connection().await?;
         let _: () = conn.del(&redis_key).await?;
 
         Ok(())

@@ -40,12 +40,19 @@ pub fn init_tracing() {
 async fn main() {
     init_tracing();
 
-    let redis_client = Arc::new(
-        redis::Client::open("redis://127.0.0.1:6379").expect("Failed to connect to Redis"),
+    // Create Redis store with connection pooling
+    let store = Arc::new(
+        RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
+            .await
+            .expect("Failed to create Redis store with connection pool"),
     );
 
-    // Create Redis store
-    let store = Arc::new(RedisBarnacleStore::new(redis_client));
+    // Alternative: Create with custom pool configuration
+    // let store = Arc::new(
+    //     RedisBarnacleStore::with_pool_config("redis://127.0.0.1:6379", 20)
+    //         .expect("Failed to create Redis store with custom pool config")
+    // );
+
     let state = AppState {
         store: store.clone(),
     };
