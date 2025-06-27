@@ -15,23 +15,28 @@
 //!
 //! ```rust,no_run
 //! use barnacle::{
-//!     create_api_key_layer, RedisApiKeyStore, RedisBarnacleStore,
-//!     ApiKeyMiddlewareConfig, BarnacleConfig
+//!     create_api_key_layer, ApiKeyMiddlewareConfig, BarnacleConfig
 //! };
+//! #[cfg(feature = "redis")]
+//! use barnacle::{RedisApiKeyStore, RedisBarnacleStore, deadpool_redis};
 //! use std::time::Duration;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create Redis stores
+//! // Create Redis stores (requires "redis" feature)
+//! #[cfg(feature = "redis")]
 //! let redis_pool = deadpool_redis::Config::from_url("redis://localhost")
 //!     .create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
 //!
+//! #[cfg(feature = "redis")]
 //! let api_key_store = RedisApiKeyStore::new(
 //!     redis_pool.clone(),
 //!     BarnacleConfig::default()
 //! );
+//! #[cfg(feature = "redis")]
 //! let rate_limit_store = RedisBarnacleStore::new(redis_pool);
 //!
 //! // Create middleware
+//! #[cfg(feature = "redis")]
 //! let middleware = create_api_key_layer(api_key_store, rate_limit_store);
 //!
 //! // Use with Axum router
@@ -50,16 +55,25 @@ mod types;
 
 // Re-export key items for easier access
 pub use api_key_middleware::{ApiKeyLayer, create_api_key_layer, create_api_key_layer_with_config};
-pub use api_key_store::{ApiKeyStore, RedisApiKeyStore, StaticApiKeyStore};
+pub use api_key_store::{ApiKeyStore, StaticApiKeyStore};
 pub use middleware::{
     BarnacleLayer, KeyExtractable, create_barnacle_layer, create_barnacle_layer_for_payload,
 };
-pub use redis_store::RedisBarnacleStore;
 pub use tracing;
 pub use types::{
     ApiKeyMiddlewareConfig, ApiKeyValidationResult, BarnacleConfig, BarnacleKey, BarnacleResult,
     ResetOnSuccess, StaticApiKeyConfig,
 };
+
+// Redis-specific exports (only available with "redis" feature)
+#[cfg(feature = "redis")]
+pub use api_key_store::RedisApiKeyStore;
+#[cfg(feature = "redis")]
+pub use redis_store::RedisBarnacleStore;
+
+// Re-export commonly used external dependencies (only with redis feature)
+#[cfg(feature = "redis")]
+pub use deadpool_redis;
 
 use async_trait::async_trait;
 

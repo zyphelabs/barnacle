@@ -3,11 +3,17 @@ name = "barnacle"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["redis"]
+redis = ["dep:redis", "dep:deadpool-redis"]
+
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
-redis = { version = "0.32.2", features = ["tokio-comp"] }
-deadpool-redis = { version = "0.21.1", features = ["rt_tokio_1"] }
+redis = { version = "0.32.2", features = ["tokio-comp"], optional = true }
+deadpool-redis = { version = "0.21.1", features = [
+    "rt_tokio_1",
+], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 async-trait = "0.1"

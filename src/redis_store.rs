@@ -1,20 +1,29 @@
+#[cfg(feature = "redis")]
 use std::sync::Arc;
+#[cfg(feature = "redis")]
 use std::time::Duration;
 
+#[cfg(feature = "redis")]
 use async_trait::async_trait;
+#[cfg(feature = "redis")]
 use deadpool_redis::redis::AsyncCommands;
+#[cfg(feature = "redis")]
 use deadpool_redis::{Connection, Pool};
+#[cfg(feature = "redis")]
 use tracing;
 
+#[cfg(feature = "redis")]
 use crate::{
     BarnacleStore,
     types::{BarnacleConfig, BarnacleKey, BarnacleResult},
 };
 
+#[cfg(feature = "redis")]
 struct RedisBarnacleStoreInner {
     pool: Pool,
 }
 
+#[cfg(feature = "redis")]
 impl RedisBarnacleStoreInner {
     fn new(pool: Pool) -> Self {
         Self { pool }
@@ -36,11 +45,13 @@ impl RedisBarnacleStoreInner {
 
 /// Implementation of BarnacleStore using Redis with connection pooling.
 /// This struct encapsulates Arc internally, so consumers don't need to wrap it.
+#[cfg(feature = "redis")]
 #[derive(Clone)]
 pub struct RedisBarnacleStore {
     inner: Arc<RedisBarnacleStoreInner>,
 }
 
+#[cfg(feature = "redis")]
 impl RedisBarnacleStore {
     /// Create a new Redis store with connection pooling
     pub fn new(pool: Pool) -> Self {
@@ -80,6 +91,7 @@ impl RedisBarnacleStore {
     }
 }
 
+#[cfg(feature = "redis")]
 #[async_trait]
 impl BarnacleStore for RedisBarnacleStore {
     async fn increment(&self, key: &BarnacleKey, config: &BarnacleConfig) -> BarnacleResult {

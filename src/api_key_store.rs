@@ -1,5 +1,7 @@
 use async_trait::async_trait;
+#[cfg(feature = "redis")]
 use deadpool_redis::redis::AsyncCommands;
+#[cfg(feature = "redis")]
 use deadpool_redis::{Connection, Pool};
 use tracing;
 
@@ -20,6 +22,7 @@ pub trait ApiKeyStore: Send + Sync {
     }
 }
 
+#[cfg(feature = "redis")]
 #[derive(Clone)]
 pub struct RedisApiKeyStore {
     pool: Pool,
@@ -27,6 +30,7 @@ pub struct RedisApiKeyStore {
     key_prefix: String,
 }
 
+#[cfg(feature = "redis")]
 impl RedisApiKeyStore {
     pub fn new(pool: Pool, default_config: BarnacleConfig) -> Self {
         Self {
@@ -54,6 +58,7 @@ impl RedisApiKeyStore {
     }
 }
 
+#[cfg(feature = "redis")]
 #[async_trait]
 impl ApiKeyStore for RedisApiKeyStore {
     async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
