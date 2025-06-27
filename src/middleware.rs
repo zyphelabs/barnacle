@@ -156,9 +156,12 @@ where
 
                         let result = store.increment(&fallback_key, &config).await;
                         if !result.allowed {
+                            let retry_after_secs =
+                                result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
                             tracing::warn!(
-                                "Rate limit exceeded for fallback key: {:?}",
-                                fallback_key
+                                "Rate limit exceeded for fallback key: {:?}, retry after {} seconds",
+                                fallback_key,
+                                retry_after_secs
                             );
                             return Ok(create_rate_limit_response(result, &config));
                         }
@@ -190,7 +193,12 @@ where
             let result = store.increment(&rate_limit_key, &config).await;
 
             if !result.allowed {
-                tracing::warn!("Rate limit exceeded for key: {:?}", rate_limit_key);
+                let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
+                tracing::warn!(
+                    "Rate limit exceeded for key: {:?}, retry after {} seconds",
+                    rate_limit_key,
+                    retry_after_secs
+                );
 
                 return Ok(create_rate_limit_response(result, &config));
             }
@@ -284,7 +292,12 @@ where
             let result = store.increment(&rate_limit_key, &config).await;
 
             if !result.allowed {
-                tracing::warn!("Rate limit exceeded for key: {:?}", rate_limit_key);
+                let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
+                tracing::warn!(
+                    "Rate limit exceeded for key: {:?}, retry after {} seconds",
+                    rate_limit_key,
+                    retry_after_secs
+                );
 
                 return Ok(create_rate_limit_response(result, &config));
             }
@@ -442,19 +455,19 @@ fn get_fallback_key_common(
 
 /// Helper function to create the barnacle layer for payload-based key extraction
 pub fn create_barnacle_layer_for_payload<T>(
-    store: Arc<impl BarnacleStore + 'static>,
+    store: impl BarnacleStore + 'static,
     config: BarnacleConfig,
 ) -> BarnacleLayer<T, impl BarnacleStore + 'static>
 where
     T: DeserializeOwned + KeyExtractable + Send + 'static,
 {
-    BarnacleLayer::new(store, config)
+    BarnacleLayer::new(Arc::new(store), config)
 }
 
 /// Helper function to create the barnacle layer without payload deserialization
 pub fn create_barnacle_layer(
-    store: Arc<impl BarnacleStore + 'static>,
+    store: impl BarnacleStore + 'static,
     config: BarnacleConfig,
 ) -> BarnacleLayer<(), impl BarnacleStore + 'static> {
-    BarnacleLayer::new(store, config)
+    BarnacleLayer::new(Arc::new(store), config)
 }

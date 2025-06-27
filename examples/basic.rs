@@ -40,17 +40,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
 
     // Create Redis store with connection pooling
-    let store = Arc::new(
-        RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
-            .await
-            .map_err(|e| format!("Failed to create Redis store with connection pool: {}", e))?,
-    );
+    let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
+        .await
+        .map_err(|e| format!("Failed to create Redis store with connection pool: {}", e))?;
 
     let state = AppState {
         store: store.clone(),
     };
 
-    // Configure different rate limiting rules
+    // Different rate limiting configurations
+    let login_config = BarnacleConfig {
+        max_requests: 3,
+        window: Duration::from_secs(60),
+        reset_on_success: ResetOnSuccess::Yes(None), // Reset on 2xx status codes
+    };
+
     let strict_config = BarnacleConfig {
         max_requests: 5,
         window: Duration::from_secs(60),
@@ -58,18 +62,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let moderate_config = BarnacleConfig {
-        max_requests: 20,
+        max_requests: 10,
         window: Duration::from_secs(60),
         reset_on_success: ResetOnSuccess::Not,
     };
 
-    let login_config = BarnacleConfig {
-        max_requests: 3,
-        window: Duration::from_secs(20),
-        reset_on_success: ResetOnSuccess::Yes(Some(vec![200])),
-    };
-
-    let login_layer =
+    // Create different middleware layers for different endpoints
+    let login_limiter =
         create_barnacle_layer_for_payload::<LoginRequest>(store.clone(), login_config.clone());
 
     let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
@@ -81,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/moderate",
             get(moderate_endpoint).layer(moderate_limiter),
         )
-        .route("/api/login", post(login_endpoint).layer(login_layer))
+        .route("/api/login", post(login_endpoint).layer(login_limiter))
         .route("/api/reset/{:key_type}/{:value}", post(reset_rate_limit))
         .route("/api/status", get(status_endpoint))
         .with_state(state);
@@ -110,7 +109,7 @@ async fn moderate_endpoint(headers: HeaderMap) -> Json<ApiResponse> {
     let rate_limit_info = extract_rate_limit_info(&headers);
 
     Json(ApiResponse {
-        message: "This endpoint has moderate rate limiting (20 requests per minute)".to_string(),
+        message: "This endpoint has moderate rate limiting (10 requests per minute)".to_string(),
         remaining_requests: rate_limit_info.as_ref().map(|info| info.remaining),
         rate_limit_info,
     })
@@ -209,7 +208,7 @@ struct LoginResponse {
 // Shared state for the application
 #[derive(Clone)]
 struct AppState {
-    store: Arc<RedisBarnacleStore>,
+    store: RedisBarnacleStore,
 }
 
 // Helper function to extract rate limit info from headers

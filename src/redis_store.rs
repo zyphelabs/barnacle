@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -10,15 +11,42 @@ use crate::{
     types::{BarnacleConfig, BarnacleKey, BarnacleResult},
 };
 
-/// Implementation of BarnacleStore using Redis with connection pooling
-pub struct RedisBarnacleStore {
+struct RedisBarnacleStoreInner {
     pool: Pool,
+}
+
+impl RedisBarnacleStoreInner {
+    fn new(pool: Pool) -> Self {
+        Self { pool }
+    }
+
+    async fn get_connection(&self) -> Result<Connection, deadpool_redis::PoolError> {
+        self.pool.get().await
+    }
+
+    fn get_redis_key(&self, key: &BarnacleKey) -> String {
+        match key {
+            BarnacleKey::Email(email) => format!("barnacle:email:{}", email),
+            BarnacleKey::ApiKey(api_key) => format!("barnacle:api_key:{}", api_key),
+            BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
+            BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
+        }
+    }
+}
+
+/// Implementation of BarnacleStore using Redis with connection pooling.
+/// This struct encapsulates Arc internally, so consumers don't need to wrap it.
+#[derive(Clone)]
+pub struct RedisBarnacleStore {
+    inner: Arc<RedisBarnacleStoreInner>,
 }
 
 impl RedisBarnacleStore {
     /// Create a new Redis store with connection pooling
     pub fn new(pool: Pool) -> Self {
-        Self { pool }
+        Self {
+            inner: Arc::new(RedisBarnacleStoreInner::new(pool)),
+        }
     }
 
     /// Create a new Redis store from a Redis URL
@@ -50,30 +78,16 @@ impl RedisBarnacleStore {
             })?;
         Ok(Self::new(pool))
     }
-
-    /// Get a connection from the pool
-    async fn get_connection(&self) -> Result<Connection, deadpool_redis::PoolError> {
-        self.pool.get().await
-    }
-
-    fn get_redis_key(&self, key: &BarnacleKey) -> String {
-        match key {
-            BarnacleKey::Email(email) => format!("barnacle:email:{}", email),
-            BarnacleKey::ApiKey(api_key) => format!("barnacle:api_key:{}", api_key),
-            BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
-            BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
-        }
-    }
 }
 
 #[async_trait]
 impl BarnacleStore for RedisBarnacleStore {
     async fn increment(&self, key: &BarnacleKey, config: &BarnacleConfig) -> BarnacleResult {
-        let redis_key = self.get_redis_key(key);
+        let redis_key = self.inner.get_redis_key(key);
         let window_seconds = config.window.as_secs() as usize;
 
         // Get Redis connection from pool
-        let mut conn = match self.get_connection().await {
+        let mut conn = match self.inner.get_connection().await {
             Ok(conn) => conn,
             Err(e) => {
                 // If Redis pool is exhausted or unavailable, log the error and deny the request for safety
@@ -157,9 +171,9 @@ impl BarnacleStore for RedisBarnacleStore {
     }
 
     async fn reset(&self, key: &BarnacleKey) -> anyhow::Result<()> {
-        let redis_key = self.get_redis_key(key);
+        let redis_key = self.inner.get_redis_key(key);
 
-        let mut conn = self.get_connection().await?;
+        let mut conn = self.inner.get_connection().await?;
         let _: () = conn.del(&redis_key).await?;
 
         Ok(())

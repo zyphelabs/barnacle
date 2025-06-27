@@ -4,7 +4,6 @@ use barnacle::{BarnacleConfig, RedisApiKeyStore, create_api_key_layer};
 use deadpool_redis::Config as RedisConfig;
 use serde_json::json;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -77,12 +76,8 @@ async fn main() {
         }
     }
 
-    // Barnacle API key layer
-    let api_key_store = Arc::new(RedisApiKeyStore::new(
-        pool.clone(),
-        BarnacleConfig::default(),
-    ));
-    let rate_limit_store = Arc::new(RedisBarnacleStore::new(pool));
+    let api_key_store = RedisApiKeyStore::new(pool.clone(), BarnacleConfig::default());
+    let rate_limit_store = RedisBarnacleStore::new(pool);
     let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
 
     // Test endpoint

@@ -20,7 +20,7 @@ pub trait ApiKeyStore: Send + Sync {
     }
 }
 
-/// Redis-based API key store for validation
+#[derive(Clone)]
 pub struct RedisApiKeyStore {
     pool: Pool,
     default_config: BarnacleConfig,

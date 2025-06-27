@@ -18,7 +18,6 @@
 //!     create_api_key_layer, RedisApiKeyStore, RedisBarnacleStore,
 //!     ApiKeyMiddlewareConfig, BarnacleConfig
 //! };
-//! use std::sync::Arc;
 //! use std::time::Duration;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,11 +25,11 @@
 //! let redis_pool = deadpool_redis::Config::from_url("redis://localhost")
 //!     .create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
 //!
-//! let api_key_store = Arc::new(RedisApiKeyStore::new(
+//! let api_key_store = RedisApiKeyStore::new(
 //!     redis_pool.clone(),
 //!     BarnacleConfig::default()
-//! ));
-//! let rate_limit_store = Arc::new(RedisBarnacleStore::new(redis_pool));
+//! );
+//! let rate_limit_store = RedisBarnacleStore::new(redis_pool);
 //!
 //! // Create middleware
 //! let middleware = create_api_key_layer(api_key_store, rate_limit_store);
@@ -52,7 +51,9 @@ mod types;
 // Re-export key items for easier access
 pub use api_key_middleware::{ApiKeyLayer, create_api_key_layer, create_api_key_layer_with_config};
 pub use api_key_store::{ApiKeyStore, RedisApiKeyStore, StaticApiKeyStore};
-pub use middleware::{KeyExtractable, create_barnacle_layer, create_barnacle_layer_for_payload};
+pub use middleware::{
+    BarnacleLayer, KeyExtractable, create_barnacle_layer, create_barnacle_layer_for_payload,
+};
 pub use redis_store::RedisBarnacleStore;
 pub use tracing;
 pub use types::{

@@ -258,31 +258,26 @@ async fn handle_rate_limit_reset<S>(
     }
 }
 
-/// Convenience function to create an API key layer with default configuration
-pub fn create_api_key_layer<A, S>(
-    api_key_store: Arc<A>,
-    rate_limit_store: Arc<S>,
-) -> ApiKeyLayer<A, S>
+pub fn create_api_key_layer<A, S>(api_key_store: A, rate_limit_store: S) -> ApiKeyLayer<A, S>
 where
     A: ApiKeyStore + 'static,
     S: BarnacleStore + 'static,
 {
     ApiKeyLayer::new(
-        api_key_store,
-        rate_limit_store,
+        Arc::new(api_key_store),
+        Arc::new(rate_limit_store),
         ApiKeyMiddlewareConfig::default(),
     )
 }
 
-/// Convenience function to create an API key layer with custom configuration
 pub fn create_api_key_layer_with_config<A, S>(
-    api_key_store: Arc<A>,
-    rate_limit_store: Arc<S>,
+    api_key_store: A,
+    rate_limit_store: S,
     config: ApiKeyMiddlewareConfig,
 ) -> ApiKeyLayer<A, S>
 where
     A: ApiKeyStore + 'static,
     S: BarnacleStore + 'static,
 {
-    ApiKeyLayer::new(api_key_store, rate_limit_store, config)
+    ApiKeyLayer::new(Arc::new(api_key_store), Arc::new(rate_limit_store), config)
 }
