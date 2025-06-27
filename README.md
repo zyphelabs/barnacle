@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/barnacle-logo.png" alt="Barnacle Logo" width="200" style="border-radius: 15px;"/>
+</div>
+
 # Barnacle 🦀
 
 A powerful and flexible rate limiting library for Rust with Redis backend support, designed primarily for Axum web applications.
@@ -33,15 +37,12 @@ deadpool-redis = { version = "0.21.1", features = ["rt_tokio_1"] }
 ```rust
 use barnacle::{create_barnacle_layer, RedisBarnacleStore, BarnacleConfig, ResetOnSuccess};
 use axum::{Router, routing::get};
-use std::sync::Arc;
 use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create Redis store
-    let store = Arc::new(
-        RedisBarnacleStore::from_url("redis://127.0.0.1:6379").await?
-    );
+    // Create Redis store (Arc is handled internally)
+    let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379").await?;
 
     // Configure rate limiting (10 requests per minute)
     let config = BarnacleConfig {
@@ -75,7 +76,6 @@ use barnacle::{
     create_api_key_layer, RedisApiKeyStore, RedisBarnacleStore,
     BarnacleConfig
 };
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -83,12 +83,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let redis_pool = deadpool_redis::Config::from_url("redis://localhost")
         .create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
 
-    // Create stores
-    let api_key_store = Arc::new(RedisApiKeyStore::new(
+    // Create stores (Arc is handled internally)
+    let api_key_store = RedisApiKeyStore::new(
         redis_pool.clone(),
         BarnacleConfig::default()
-    ));
-    let rate_limit_store = Arc::new(RedisBarnacleStore::new(redis_pool));
+    );
+    let rate_limit_store = RedisBarnacleStore::new(redis_pool);
 
     // Create API key middleware
     let middleware = create_api_key_layer(api_key_store, rate_limit_store);
@@ -172,7 +172,7 @@ let ip_limiter = create_barnacle_layer(store, config);
 #### API Key-based Rate Limiting
 
 ```rust
-// Uses x-api-key header for rate limiting
+// Uses x-api-key header for rate limiting  
 let api_limiter = create_api_key_layer(api_key_store, rate_limit_store);
 ```
 
@@ -230,7 +230,7 @@ api_keys.insert("test-key-123".to_string(), StaticApiKeyConfig {
     config: BarnacleConfig::default(),
 });
 
-let static_store = Arc::new(StaticApiKeyStore::new(api_keys));
+let static_store = StaticApiKeyStore::new(api_keys);
 ```
 
 ## Examples
