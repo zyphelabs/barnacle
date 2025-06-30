@@ -4,15 +4,29 @@
 
 # Barnacle 🦀
 
-Rate limiting for Axum with Redis backend.
+[![Crates.io](https://img.shields.io/crates/v/barnacle-rs)](https://crates.io/crates/barnacle-rs)
+[![Documentation](https://img.shields.io/docsrs/barnacle-rs)](https://docs.rs/barnacle-rs)
+[![License](https://img.shields.io/crates/l/barnacle-rs)](https://github.com/zyphelabs/barnacle-rs/blob/main/LICENSE)
+[![Rust Version](https://img.shields.io/badge/rust-1.70+-blue.svg)](https://www.rust-lang.org)
 
-[Repository](https://github.com/zyphelabs/barnacle-rs)
+Rate limiting middleware for Axum with Redis backend and API key validation.
+
+[Repository](https://github.com/zyphelabs/barnacle-rs) | [Documentation](https://docs.rs/barnacle-rs) | [Crates.io](https://crates.io/crates/barnacle-rs)
+
+## Features
+
+- **Rate Limiting**: IP-based or custom key-based rate limiting
+- **API Key Validation**: Validate `x-api-key` header with per-key limits
+- **Redis Backend**: Distributed rate limiting with Redis
+- **Axum Middleware**: Drop-in middleware for Axum applications
+- **Reset on Success**: Optional rate limit reset on successful operations
+- **Extensible Design**: Custom key stores and rate limiting strategies
 
 ## Quick Start
 
 ```toml
 [dependencies]
-barnacle = "0.1.0"
+barnacle-rs = "0.1.0"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 ```
@@ -77,14 +91,6 @@ async fn protected_handler() -> &'static str {
     "Protected endpoint"
 }
 ```
-
-## Features
-
-- **Rate Limiting**: IP-based or custom key-based rate limiting
-- **API Key Validation**: Validate `x-api-key` header with per-key limits
-- **Redis Backend**: Distributed rate limiting with Redis
-- **Axum Middleware**: Drop-in middleware for Axum applications
-- **Reset on Success**: Optional rate limit reset on successful operations
 
 ## Configuration
 
@@ -155,3 +161,7 @@ cargo run --example api_key_redis_test
 ## License
 
 MIT
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

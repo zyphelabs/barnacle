@@ -4,7 +4,6 @@ use axum::http::{HeaderMap, Response, StatusCode};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use tracing;
 
 use crate::api_key_store::ApiKeyStore;
 use crate::types::{ApiKeyMiddlewareConfig, BarnacleKey};

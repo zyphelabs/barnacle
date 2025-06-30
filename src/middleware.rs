@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
-use tracing;
 
 use crate::types::ResetOnSuccess;
 use crate::{

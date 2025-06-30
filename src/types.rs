@@ -35,7 +35,7 @@ impl BarnacleConfig {
                     codes.contains(&status_code)
                 } else {
                     // Default to 2xx status codes
-                    status_code >= 200 && status_code < 300
+                    (200..300).contains(&status_code)
                 }
             }
         }

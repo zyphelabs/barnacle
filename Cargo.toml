@@ -1,7 +1,24 @@
 [package]
 name = "barnacle-rs"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+description = "Rate limiting middleware for Axum with Key Extractor and API key validation"
+readme = "README.md"
+license = "MIT"
+repository = "https://github.com/zyphelabs/barnacle-rs"
+homepage = "https://github.com/zyphelabs/barnacle-rs"
+keywords = [
+    "rate-limiting",
+    "axum",
+    "redis",
+    "middleware",
+    "api-key",
+    "web",
+    "http",
+]
+categories = ["web-programming::http-server", "asynchronous", "caching"]
+authors = ["Zyphe Inc <team@zyphe.com>"]
+rust-version = "1.70"
 
 [features]
 default = ["redis"]

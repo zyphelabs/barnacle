@@ -9,13 +9,10 @@ use async_trait::async_trait;
 use deadpool_redis::redis::AsyncCommands;
 #[cfg(feature = "redis")]
 use deadpool_redis::{Connection, Pool};
-#[cfg(feature = "redis")]
-use tracing;
 
-#[cfg(feature = "redis")]
 use crate::{
-    BarnacleStore,
     types::{BarnacleConfig, BarnacleKey, BarnacleResult},
+    BarnacleStore,
 };
 
 #[cfg(feature = "redis")]
