@@ -206,163 +206,167 @@ async fn start_test_server() -> String {
     base_url
 }
 
-// Test 1: Basic Rate Limiting (5 requests per minute), this test will fail second time cargo test is run
-#[tokio::test]
-async fn test_basic_rate_limiting() {
-    let base_url = start_test_server().await;
-    let client = reqwest::Client::new();
+mod rate_limit {
+    use super::*;
 
-    // Make 6 requests to /api/strict endpoint
-    let mut responses = Vec::new();
-    for i in 1..=6 {
-        let response = client
-            .get(&format!("{}/api/strict", base_url))
-            .send()
-            .await
-            .expect(&format!("Request {} failed", i));
+    // Test 1: Basic Rate Limiting (5 requests per minute), this test will fail second time cargo test is run
+    #[tokio::test]
+    async fn test_basic_rate_limiting() {
+        let base_url = start_test_server().await;
+        let client = reqwest::Client::new();
 
-        println!("Request {} status: {:?}", i, response.status());
+        // Make 6 requests to /api/strict endpoint
+        let mut responses = Vec::new();
+        for i in 1..=6 {
+            let response = client
+                .get(&format!("{}/api/strict", base_url))
+                .send()
+                .await
+                .expect(&format!("Request {} failed", i));
 
-        responses.push(response.status());
-        sleep(Duration::from_millis(100)).await;
+            println!("Request {} status: {:?}", i, response.status());
+
+            responses.push(response.status());
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        // First 5 requests should succeed (200), 6th should fail (429)
+        for (i, status) in responses.iter().enumerate() {
+            if i < 5 {
+                assert_eq!(
+                    *status,
+                    reqwest::StatusCode::OK,
+                    "Request {} should succeed",
+                    i + 1
+                );
+            } else {
+                assert_eq!(
+                    *status,
+                    reqwest::StatusCode::TOO_MANY_REQUESTS,
+                    "Request {} should be rate limited",
+                    i + 1
+                );
+            }
+        }
     }
 
-    // First 5 requests should succeed (200), 6th should fail (429)
-    for (i, status) in responses.iter().enumerate() {
-        if i < 5 {
+    // Test 2: Different Rate Limits, this should fail if cargo test runs 4 times.
+    #[tokio::test]
+    async fn test_different_rate_limits() {
+        let base_url = start_test_server().await;
+        let client = reqwest::Client::new();
+
+        // Test moderate endpoint (20 requests per minute)
+        // Make 6 requests to /api/moderate endpoint
+        let mut responses = Vec::new();
+        for i in 1..=6 {
+            let response = client
+                .get(&format!("{}/api/moderate", base_url))
+                .send()
+                .await
+                .expect(&format!("Request {} failed", i));
+
+            println!("Moderate Request {} status: {:?}", i, response.status());
+
+            responses.push(response.status());
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        // All 6 requests should succeed (200) since moderate allows 20 requests per minute
+        for (i, status) in responses.iter().enumerate() {
             assert_eq!(
                 *status,
                 reqwest::StatusCode::OK,
-                "Request {} should succeed",
-                i + 1
-            );
-        } else {
-            assert_eq!(
-                *status,
-                reqwest::StatusCode::TOO_MANY_REQUESTS,
-                "Request {} should be rate limited",
+                "Moderate request {} should succeed",
                 i + 1
             );
         }
     }
-}
 
-// Test 2: Different Rate Limits, this should fail if cargo test runs 4 times.
-#[tokio::test]
-async fn test_different_rate_limits() {
-    let base_url = start_test_server().await;
-    let client = reqwest::Client::new();
+    // Test 3: Login Rate Limiting with Different Emails
+    #[tokio::test]
+    async fn test_login_rate_limiting_different_emails() {
+        let base_url = start_test_server().await;
+        let client = reqwest::Client::new();
 
-    // Test moderate endpoint (20 requests per minute)
-    // Make 6 requests to /api/moderate endpoint
-    let mut responses = Vec::new();
-    for i in 1..=6 {
-        let response = client
-            .get(&format!("{}/api/moderate", base_url))
+        // Reset the rate limit for user1@example.com, reseting for tests always pass
+        let reset_response = client
+            .post(&format!("{}/api/reset/email/user1@example.com", base_url))
             .send()
             .await
-            .expect(&format!("Request {} failed", i));
+            .expect("Reset request failed");
 
-        println!("Moderate Request {} status: {:?}", i, response.status());
+        println!("Reset response status: {:?}", reset_response.status());
 
-        responses.push(response.status());
-        sleep(Duration::from_millis(100)).await;
-    }
-
-    // All 6 requests should succeed (200) since moderate allows 20 requests per minute
-    for (i, status) in responses.iter().enumerate() {
+        // Reset should succeed (200)
         assert_eq!(
-            *status,
+            reset_response.status(),
             reqwest::StatusCode::OK,
-            "Moderate request {} should succeed",
-            i + 1
+            "Reset should succeed"
         );
-    }
-}
 
-// Test 3: Login Rate Limiting with Different Emails
-#[tokio::test]
-async fn test_login_rate_limiting_different_emails() {
-    let base_url = start_test_server().await;
-    let client = reqwest::Client::new();
+        let mut responses = Vec::new();
+        let login_data = json!({
+            "email": "user1@example.com",
+            "password": "wrong_password"
+        });
+        for i in 1..=5 {
+            let response = client
+                .post(&format!("{}/api/login", base_url))
+                .json(&login_data)
+                .send()
+                .await
+                .expect(&format!("Login request {} failed", i));
 
-    // Reset the rate limit for user1@example.com, reseting for tests always pass
-    let reset_response = client
-        .post(&format!("{}/api/reset/email/user1@example.com", base_url))
-        .send()
-        .await
-        .expect("Reset request failed");
+            println!("Failed login {} status: {:?}", i, response.status());
 
-    println!("Reset response status: {:?}", reset_response.status());
+            responses.push(response.status());
+            sleep(Duration::from_millis(100)).await;
+        }
 
-    // Reset should succeed (200)
-    assert_eq!(
-        reset_response.status(),
-        reqwest::StatusCode::OK,
-        "Reset should succeed"
-    );
+        // First 4 attempts should fail per 401, last one should fail per 429
+        for (i, status) in responses.iter().enumerate() {
+            if i < 4 {
+                assert_eq!(
+                    *status,
+                    reqwest::StatusCode::UNAUTHORIZED,
+                    "Failed login {} should return 401",
+                    i + 1
+                );
+            } else {
+                assert_eq!(
+                    *status,
+                    reqwest::StatusCode::TOO_MANY_REQUESTS,
+                    "5th failed login should be rate limited"
+                );
+            }
+        }
 
-    let mut responses = Vec::new();
-    let login_data = json!({
-        "email": "user1@example.com",
-        "password": "wrong_password"
-    });
-    for i in 1..=5 {
+        // Now try a successful login with a different email - should work
+        let login_data_user2 = json!({
+            "email": "user2@example.com",
+            "password": "correct_password"
+        });
+
         let response = client
             .post(&format!("{}/api/login", base_url))
-            .json(&login_data)
+            .json(&login_data_user2)
             .send()
             .await
-            .expect(&format!("Login request {} failed", i));
+            .expect("Successful login request failed");
 
-        println!("Failed login {} status: {:?}", i, response.status());
+        // The successful login should work (200)
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "Successful login with different email should work"
+        );
 
-        responses.push(response.status());
-        sleep(Duration::from_millis(100)).await;
+        // Verify the response contains the success message
+        let response_text = response.text().await.expect("Failed to read response text");
+        assert!(
+            response_text.contains("Login successful"),
+            "Response should contain success message"
+        );
     }
-
-    // First 4 attempts should fail per 401, last one should fail per 429
-    for (i, status) in responses.iter().enumerate() {
-        if i < 4 {
-            assert_eq!(
-                *status,
-                reqwest::StatusCode::UNAUTHORIZED,
-                "Failed login {} should return 401",
-                i + 1
-            );
-        } else {
-            assert_eq!(
-                *status,
-                reqwest::StatusCode::TOO_MANY_REQUESTS,
-                "5th failed login should be rate limited"
-            );
-        }
-    }
-
-    // Now try a successful login with a different email - should work
-    let login_data_user2 = json!({
-        "email": "user2@example.com",
-        "password": "correct_password"
-    });
-
-    let response = client
-        .post(&format!("{}/api/login", base_url))
-        .json(&login_data_user2)
-        .send()
-        .await
-        .expect("Successful login request failed");
-
-    // The successful login should work (200)
-    assert_eq!(
-        response.status(),
-        reqwest::StatusCode::OK,
-        "Successful login with different email should work"
-    );
-
-    // Verify the response contains the success message
-    let response_text = response.text().await.expect("Failed to read response text");
-    assert!(
-        response_text.contains("Login successful"),
-        "Response should contain success message"
-    );
 }

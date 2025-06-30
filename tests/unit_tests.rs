@@ -2,7 +2,7 @@ use barnacle_rs::{BarnacleConfig, BarnacleKey, ResetOnSuccess};
 use std::time::Duration;
 
 #[cfg(test)]
-mod tests {
+mod basic_unit_tests {
     use super::*;
 
     #[test]
