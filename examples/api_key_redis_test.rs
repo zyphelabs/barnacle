@@ -1,6 +1,6 @@
 use axum::{Json, Router, routing::get};
-use barnacle::RedisBarnacleStore;
-use barnacle::{BarnacleConfig, RedisApiKeyStore, create_api_key_layer};
+use barnacle_rs::RedisBarnacleStore;
+use barnacle_rs::{BarnacleConfig, RedisApiKeyStore, create_api_key_layer};
 use deadpool_redis::Config as RedisConfig;
 use serde_json::json;
 use std::net::SocketAddr;

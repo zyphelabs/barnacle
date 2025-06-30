@@ -14,11 +14,11 @@
 //! ## Basic Usage
 //!
 //! ```rust,no_run
-//! use barnacle::{
+//! use barnacle_rs::{
 //!     create_api_key_layer, ApiKeyMiddlewareConfig, BarnacleConfig
 //! };
 //! #[cfg(feature = "redis")]
-//! use barnacle::{RedisApiKeyStore, RedisBarnacleStore, deadpool_redis};
+//! use barnacle_rs::{RedisApiKeyStore, RedisBarnacleStore, deadpool_redis};
 //! use std::time::Duration;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {

@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Json},
     routing::{get, post},
 };
-use barnacle::{
+use barnacle_rs::{
     BarnacleConfig, BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
     create_barnacle_layer, create_barnacle_layer_for_payload,
 };

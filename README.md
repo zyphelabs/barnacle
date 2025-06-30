@@ -35,7 +35,7 @@ deadpool-redis = { version = "0.21.1", features = ["rt_tokio_1"] }
 ### Basic Rate Limiting
 
 ```rust
-use barnacle::{create_barnacle_layer, RedisBarnacleStore, BarnacleConfig, ResetOnSuccess};
+use barnacle_rs::{create_barnacle_layer, RedisBarnacleStore, BarnacleConfig, ResetOnSuccess};
 use axum::{Router, routing::get};
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ async fn handler() -> &'static str {
 ### API Key Validation with Rate Limiting
 
 ```rust
-use barnacle::{
+use barnacle_rs::{
     create_api_key_layer, RedisApiKeyStore, RedisBarnacleStore,
     BarnacleConfig
 };
@@ -111,7 +111,7 @@ async fn protected_handler() -> &'static str {
 ### Custom Key Extraction (Email-based Rate Limiting)
 
 ```rust
-use barnacle::{KeyExtractable, BarnacleKey, create_barnacle_layer_for_payload};
+use barnacle_rs::{KeyExtractable, BarnacleKey, create_barnacle_layer_for_payload};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -148,7 +148,7 @@ let app = Router::new()
 ### BarnacleConfig
 
 ```rust
-use barnacle::{BarnacleConfig, ResetOnSuccess};
+use barnacle_rs::{BarnacleConfig, ResetOnSuccess};
 use std::time::Duration;
 
 let config = BarnacleConfig {
@@ -222,7 +222,7 @@ let _: () = redis::cmd("SET")
 ### Static API Keys (for testing)
 
 ```rust
-use barnacle::{StaticApiKeyStore, StaticApiKeyConfig};
+use barnacle_rs::{StaticApiKeyStore, StaticApiKeyConfig};
 use std::collections::HashMap;
 
 let mut api_keys = HashMap::new();
@@ -261,7 +261,7 @@ curl -H "x-api-key: valid-key-123" http://localhost:3000/test
 Barnacle provides comprehensive error handling:
 
 ```rust
-use barnacle::BarnacleResult;
+use barnacle_rs::BarnacleResult;
 
 match result {
     Ok(rate_limit_info) => {
