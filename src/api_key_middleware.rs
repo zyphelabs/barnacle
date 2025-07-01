@@ -144,7 +144,7 @@ where
                     .await;
 
                 if !rate_limit_result.allowed {
-                    tracing::warn!(
+                    tracing::debug!(
                         "Rate limit exceeded for API key: {}, remaining: {}, retry_after: {:?}",
                         api_key,
                         rate_limit_result.remaining,

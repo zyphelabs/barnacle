@@ -10,8 +10,8 @@ use tower::{Layer, Service};
 
 use crate::types::ResetOnSuccess;
 use crate::{
-    BarnacleStore,
     types::{BarnacleConfig, BarnacleKey},
+    BarnacleStore,
 };
 
 /// Trait to extract the key from any payload type
@@ -193,7 +193,7 @@ where
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::warn!(
+                tracing::debug!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
                     rate_limit_key,
                     retry_after_secs
@@ -292,7 +292,7 @@ where
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::warn!(
+                tracing::debug!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
                     rate_limit_key,
                     retry_after_secs
@@ -395,7 +395,7 @@ async fn handle_rate_limit_reset<S>(
     }
 
     match store.reset(key).await {
-        Ok(_) => tracing::info!(
+        Ok(_) => tracing::trace!(
             "Rate limit reset for {} {:?} after successful request (status: {})",
             key_type,
             key,
@@ -422,7 +422,7 @@ fn get_fallback_key_common(
 ) -> BarnacleKey {
     // 1. Try ConnectInfo<SocketAddr> (only available in full Request)
     if let Some(addr) = extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>() {
-        tracing::debug!("IP via ConnectInfo: {}", addr.ip());
+        tracing::trace!("IP via ConnectInfo: {}", addr.ip());
         return BarnacleKey::Ip(addr.ip().to_string());
     }
 
