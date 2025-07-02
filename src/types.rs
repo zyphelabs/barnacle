@@ -51,6 +51,14 @@ pub enum BarnacleKey {
     Custom(String),
 }
 
+/// Rate limiting context that includes route information
+#[derive(Clone, Debug)]
+pub struct BarnacleContext {
+    pub key: BarnacleKey,
+    pub path: String,
+    pub method: String,
+}
+
 /// Result of an increment attempt
 #[derive(Clone, Debug)]
 pub struct BarnacleResult {

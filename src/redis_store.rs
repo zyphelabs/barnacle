@@ -11,7 +11,7 @@ use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Connection, Pool};
 
 use crate::{
-    types::{BarnacleConfig, BarnacleKey, BarnacleResult},
+    types::{BarnacleConfig, BarnacleContext, BarnacleKey, BarnacleResult},
     BarnacleStore,
 };
 
@@ -30,13 +30,16 @@ impl RedisBarnacleStoreInner {
         self.pool.get().await
     }
 
-    fn get_redis_key(&self, key: &BarnacleKey) -> String {
-        match key {
+    fn get_redis_key(&self, context: &BarnacleContext) -> String {
+        let base_key = match &context.key {
             BarnacleKey::Email(email) => format!("barnacle:email:{}", email),
             BarnacleKey::ApiKey(api_key) => format!("barnacle:api_key:{}", api_key),
             BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
             BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
-        }
+        };
+
+        // Include path and method in the Redis key
+        format!("{}:{}:{}", base_key, context.method, context.path)
     }
 }
 
@@ -91,8 +94,12 @@ impl RedisBarnacleStore {
 #[cfg(feature = "redis")]
 #[async_trait]
 impl BarnacleStore for RedisBarnacleStore {
-    async fn increment(&self, key: &BarnacleKey, config: &BarnacleConfig) -> BarnacleResult {
-        let redis_key = self.inner.get_redis_key(key);
+    async fn increment(
+        &self,
+        context: &BarnacleContext,
+        config: &BarnacleConfig,
+    ) -> BarnacleResult {
+        let redis_key = self.inner.get_redis_key(context);
         let window_seconds = config.window.as_secs() as usize;
 
         // Get Redis connection from pool
@@ -179,8 +186,8 @@ impl BarnacleStore for RedisBarnacleStore {
         }
     }
 
-    async fn reset(&self, key: &BarnacleKey) -> anyhow::Result<()> {
-        let redis_key = self.inner.get_redis_key(key);
+    async fn reset(&self, context: &BarnacleContext) -> anyhow::Result<()> {
+        let redis_key = self.inner.get_redis_key(context);
 
         let mut conn = self.inner.get_connection().await?;
         let _: () = conn.del(&redis_key).await?;

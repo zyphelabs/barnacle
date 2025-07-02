@@ -1,15 +1,15 @@
 use std::time::Duration;
 
 use axum::{
-    Router,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
+    Router,
 };
 use barnacle_rs::{
-    BarnacleConfig, BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
-    create_barnacle_layer, create_barnacle_layer_for_payload,
+    create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleConfig, BarnacleContext,
+    BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -139,7 +139,14 @@ async fn reset_rate_limit(
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
-    match state.store.reset(&key).await {
+    // Create context with empty path/method for reset endpoint
+    let context = BarnacleContext {
+        key,
+        path: "/reset".to_string(),
+        method: "POST".to_string(),
+    };
+
+    match state.store.reset(&context).await {
         Ok(_) => Ok(Json(ApiResponse {
             message: format!("Rate limit reset for {}: {}", key_type, value),
             remaining_requests: None,

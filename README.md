@@ -138,6 +138,24 @@ impl KeyExtractable for LoginRequest {
 let limiter = create_barnacle_layer_for_payload::<LoginRequest>(store, config);
 ```
 
+## Automatic Route-Based Rate Limiting
+
+Barnacle automatically includes route information (path and method) in Redis keys, providing per-endpoint rate limiting without any additional configuration:
+
+**Redis Key Format:**
+```
+barnacle:email:user@example.com:POST:/auth/login
+barnacle:email:user@example.com:POST:/auth/start-reset
+barnacle:api_key:your-key:GET:/api/data
+barnacle:ip:192.168.1.1:POST:/api/submit
+```
+
+This means:
+- ✅ Same email can have different rate limits per endpoint
+- ✅ No need to modify `KeyExtractable` implementations
+- ✅ Automatic separation of rate limits by route
+- ✅ Backward compatible with existing code
+
 ## Redis Setup
 
 Store API keys in Redis:

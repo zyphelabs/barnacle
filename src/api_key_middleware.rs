@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
 use crate::api_key_store::ApiKeyStore;
-use crate::types::{ApiKeyMiddlewareConfig, BarnacleKey};
+use crate::types::{ApiKeyMiddlewareConfig, BarnacleContext, BarnacleKey};
 use crate::{BarnacleConfig, BarnacleStore};
 
 /// Layer for API key validation and rate limiting
@@ -138,9 +138,16 @@ where
                 // Create rate limiting key
                 let rate_limit_key = BarnacleKey::ApiKey(api_key.clone());
 
+                // Create context with route information
+                let context = BarnacleContext {
+                    key: rate_limit_key,
+                    path: req.uri().path().to_string(),
+                    method: req.method().as_str().to_string(),
+                };
+
                 // Check rate limit
                 let rate_limit_result = rate_limit_store
-                    .increment(&rate_limit_key, &rate_limit_config)
+                    .increment(&context, &rate_limit_config)
                     .await;
 
                 if !rate_limit_result.allowed {
@@ -181,7 +188,7 @@ where
                 handle_rate_limit_reset(
                     &rate_limit_store,
                     &rate_limit_config,
-                    &rate_limit_key,
+                    &context,
                     response.status().as_u16(),
                 )
                 .await;
@@ -240,18 +247,22 @@ fn create_rate_limit_response(
 async fn handle_rate_limit_reset<S>(
     store: &Arc<S>,
     config: &BarnacleConfig,
-    key: &BarnacleKey,
+    context: &BarnacleContext,
     status_code: u16,
 ) where
     S: BarnacleStore + 'static,
 {
     if config.is_success_status(status_code) {
-        if let Err(e) = store.reset(key).await {
-            tracing::warn!("Failed to reset rate limit for key {:?}: {}", key, e);
+        if let Err(e) = store.reset(context).await {
+            tracing::warn!(
+                "Failed to reset rate limit for key {:?}: {}",
+                context.key,
+                e
+            );
         } else {
             tracing::debug!(
                 "Reset rate limit for key {:?} after successful response",
-                key
+                context.key
             );
         }
     }

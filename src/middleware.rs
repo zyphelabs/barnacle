@@ -10,7 +10,7 @@ use tower::{Layer, Service};
 
 use crate::types::ResetOnSuccess;
 use crate::{
-    types::{BarnacleConfig, BarnacleKey},
+    types::{BarnacleConfig, BarnacleContext, BarnacleKey},
     BarnacleStore,
 };
 
@@ -135,31 +135,54 @@ where
             let (parts, body) = req.into_parts();
 
             // If T is (), we don't need to deserialize the body
-            let (rate_limit_key, body_bytes) = if std::any::TypeId::of::<T>()
+            let (rate_limit_context, body_bytes) = if std::any::TypeId::of::<T>()
                 == std::any::TypeId::of::<()>()
             {
-                (get_fallback_key_from_parts(&parts), None)
+                let fallback_key = get_fallback_key_from_parts(&parts);
+                let context = BarnacleContext {
+                    key: fallback_key,
+                    path: parts.uri.path().to_string(),
+                    method: parts.method.as_str().to_string(),
+                };
+                (context, None)
             } else {
                 // Try to extract key from request body using KeyExtractable trait
                 match body.collect().await {
                     Ok(collected) => {
                         let bytes = collected.to_bytes();
                         if let Ok(payload) = serde_json::from_slice::<T>(&bytes) {
-                            (payload.extract_key(), Some(bytes))
+                            let key = payload.extract_key();
+                            let context = BarnacleContext {
+                                key,
+                                path: parts.uri.path().to_string(),
+                                method: parts.method.as_str().to_string(),
+                            };
+                            (context, Some(bytes))
                         } else {
-                            (get_fallback_key_from_parts(&parts), Some(bytes))
+                            let fallback_key = get_fallback_key_from_parts(&parts);
+                            let context = BarnacleContext {
+                                key: fallback_key,
+                                path: parts.uri.path().to_string(),
+                                method: parts.method.as_str().to_string(),
+                            };
+                            (context, Some(bytes))
                         }
                     }
                     Err(_) => {
                         let fallback_key = get_fallback_key_from_parts(&parts);
+                        let context = BarnacleContext {
+                            key: fallback_key,
+                            path: parts.uri.path().to_string(),
+                            method: parts.method.as_str().to_string(),
+                        };
 
-                        let result = store.increment(&fallback_key, &config).await;
+                        let result = store.increment(&context, &config).await;
                         if !result.allowed {
                             let retry_after_secs =
                                 result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
                             tracing::warn!(
                                 "Rate limit exceeded for fallback key: {:?}, retry after {} seconds",
-                                fallback_key,
+                                context.key,
                                 retry_after_secs
                             );
                             return Ok(create_rate_limit_response(result, &config));
@@ -167,7 +190,7 @@ where
 
                         tracing::debug!(
                             "Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
-                            fallback_key,
+                            context.key,
                             result.remaining,
                             result.retry_after
                         );
@@ -178,7 +201,7 @@ where
                         handle_rate_limit_reset(
                             &store,
                             &config,
-                            &fallback_key,
+                            &context,
                             response.status().as_u16(),
                             true,
                         )
@@ -189,13 +212,13 @@ where
                 }
             };
 
-            let result = store.increment(&rate_limit_key, &config).await;
+            let result = store.increment(&rate_limit_context, &config).await;
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
                 tracing::debug!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    rate_limit_key,
+                    rate_limit_context.key,
                     retry_after_secs
                 );
 
@@ -204,7 +227,7 @@ where
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                rate_limit_key,
+                rate_limit_context.key,
                 result.remaining,
                 result.retry_after
             );
@@ -247,7 +270,7 @@ where
             handle_rate_limit_reset(
                 &store,
                 &config,
-                &rate_limit_key,
+                &rate_limit_context,
                 response_with_headers.status().as_u16(),
                 false,
             )
@@ -288,13 +311,18 @@ where
 
             // For () type, always use fallback key
             let rate_limit_key = get_fallback_key_from_parts(&parts);
-            let result = store.increment(&rate_limit_key, &config).await;
+            let context = BarnacleContext {
+                key: rate_limit_key,
+                path: parts.uri.path().to_string(),
+                method: parts.method.as_str().to_string(),
+            };
+            let result = store.increment(&context, &config).await;
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
                 tracing::debug!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    rate_limit_key,
+                    context.key,
                     retry_after_secs
                 );
 
@@ -303,7 +331,7 @@ where
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                rate_limit_key,
+                context.key,
                 result.remaining,
                 result.retry_after
             );
@@ -317,18 +345,11 @@ where
             let mut response_with_headers = response;
             let headers = response_with_headers.headers_mut();
 
-            tracing::debug!(
-                "Adding rate limit headers - remaining: {}, limit: {}",
-                result.remaining,
-                config.max_requests
-            );
-
             if let Ok(remaining_header) = result.remaining.to_string().parse() {
                 headers.insert("X-RateLimit-Remaining", remaining_header);
+                tracing::debug!("Added X-RateLimit-Remaining: {}", result.remaining);
             }
-            if let Ok(limit_header) = config.max_requests.to_string().parse() {
-                headers.insert("X-RateLimit-Limit", limit_header);
-            }
+
             if let Some(retry_after) = result.retry_after {
                 if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
                     headers.insert("X-RateLimit-Reset", reset_header);
@@ -339,7 +360,7 @@ where
             handle_rate_limit_reset(
                 &store,
                 &config,
-                &rate_limit_key,
+                &context,
                 response_with_headers.status().as_u16(),
                 false,
             )
@@ -373,7 +394,7 @@ fn create_rate_limit_response(
 async fn handle_rate_limit_reset<S>(
     store: &Arc<S>,
     config: &BarnacleConfig,
-    key: &BarnacleKey,
+    context: &BarnacleContext,
     status_code: u16,
     is_fallback: bool,
 ) where
@@ -388,23 +409,23 @@ async fn handle_rate_limit_reset<S>(
         tracing::debug!(
             "Not resetting rate limit for {} {:?} due to error status: {}",
             key_type,
-            key,
+            context.key,
             status_code
         );
         return;
     }
 
-    match store.reset(key).await {
+    match store.reset(context).await {
         Ok(_) => tracing::trace!(
             "Rate limit reset for {} {:?} after successful request (status: {})",
             key_type,
-            key,
+            context.key,
             status_code
         ),
         Err(e) => tracing::error!(
             "Failed to reset rate limit for {} {:?}: {}",
             key_type,
-            key,
+            context.key,
             e
         ),
     }
