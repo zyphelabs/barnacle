@@ -49,6 +49,7 @@
 
 mod api_key_middleware;
 mod api_key_store;
+mod error;
 mod middleware;
 mod redis_store;
 mod types;
@@ -56,14 +57,18 @@ mod types;
 // Re-export key items for easier access
 pub use api_key_middleware::{create_api_key_layer, create_api_key_layer_with_config, ApiKeyLayer};
 pub use api_key_store::{ApiKeyStore, StaticApiKeyStore};
+pub use error::{BarnacleError, BarnacleResult, FromBarnacleError};
 pub use middleware::{
     create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleLayer, KeyExtractable,
 };
 pub use tracing;
 pub use types::{
     ApiKeyMiddlewareConfig, ApiKeyValidationResult, BarnacleConfig, BarnacleContext, BarnacleKey,
-    BarnacleResult, ResetOnSuccess, StaticApiKeyConfig,
+    ResetOnSuccess, StaticApiKeyConfig,
 };
+
+// Re-export the legacy BarnacleResult type from types.rs for backward compatibility
+pub use types::BarnacleResult as LegacyBarnacleResult;
 
 // Redis-specific exports (only available with "redis" feature)
 #[cfg(feature = "redis")]
@@ -82,7 +87,7 @@ use async_trait::async_trait;
 pub trait BarnacleStore: Send + Sync {
     /// Increments the counter for the key and returns the current number of requests and remaining time until reset.
     async fn increment(&self, context: &BarnacleContext, config: &BarnacleConfig)
-        -> BarnacleResult;
+        -> types::BarnacleResult;
     /// Resets the counter for the key (e.g., after successful login).
-    async fn reset(&self, context: &BarnacleContext) -> anyhow::Result<()>;
+    async fn reset(&self, context: &BarnacleContext) -> Result<(), BarnacleError>;
 }
