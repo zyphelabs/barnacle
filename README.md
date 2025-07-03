@@ -26,7 +26,7 @@ Rate limiting middleware for Axum with Redis backend and API key validation.
 
 ```toml
 [dependencies]
-barnacle-rs = "0.1.0"
+barnacle-rs = "0.1.2"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 ```
@@ -143,6 +143,7 @@ let limiter = create_barnacle_layer_for_payload::<LoginRequest>(store, config);
 Barnacle automatically includes route information (path and method) in Redis keys, providing per-endpoint rate limiting without any additional configuration:
 
 **Redis Key Format:**
+
 ```
 barnacle:email:user@example.com:POST:/auth/login
 barnacle:email:user@example.com:POST:/auth/start-reset
@@ -151,6 +152,7 @@ barnacle:ip:192.168.1.1:POST:/api/submit
 ```
 
 This means:
+
 - ✅ Same email can have different rate limits per endpoint
 - ✅ No need to modify `KeyExtractable` implementations
 - ✅ Automatic separation of rate limits by route
