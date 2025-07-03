@@ -1,11 +1,13 @@
 use axum::body::Body;
 use axum::extract::Request;
-use axum::http::{HeaderMap, Response, StatusCode};
+use axum::http::{HeaderMap, Response};
+use axum::response::IntoResponse;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
 use crate::api_key_store::ApiKeyStore;
+use crate::error::BarnacleError;
 use crate::types::{ApiKeyMiddlewareConfig, BarnacleContext, BarnacleKey};
 use crate::{BarnacleConfig, BarnacleStore};
 
@@ -118,7 +120,8 @@ where
             // Handle missing API key
             if api_key.is_none() && config.require_api_key {
                 tracing::warn!("API key missing in header: {}", config.header_name);
-                return Ok(create_unauthorized_response("API key required"));
+                let error = BarnacleError::ApiKeyMissing;
+                return Ok(error.into_response());
             }
 
             // If we have an API key, validate it
@@ -127,7 +130,8 @@ where
 
                 if !validation_result.valid {
                     tracing::warn!("Invalid API key: {}", api_key);
-                    return Ok(create_unauthorized_response("Invalid API key"));
+                    let error = BarnacleError::invalid_api_key(&api_key);
+                    return Ok(error.into_response());
                 }
 
                 // Get rate limit configuration for this key
@@ -211,37 +215,24 @@ fn extract_api_key(headers: &HeaderMap, header_name: &str) -> Option<String> {
     None
 }
 
-fn create_unauthorized_response(message: &str) -> Response<Body> {
-    Response::builder()
-        .status(StatusCode::UNAUTHORIZED)
-        .header("Content-Type", "application/json")
-        .body(Body::from(format!(r#"{{"error": "{}"}}"#, message)))
-        .unwrap()
-}
+
 
 fn create_rate_limit_response(
     result: crate::types::BarnacleResult,
     config: &BarnacleConfig,
 ) -> Response<Body> {
-    let retry_after = result.retry_after.unwrap_or(config.window);
+    let retry_after_secs = result
+        .retry_after
+        .unwrap_or(config.window)
+        .as_secs();
 
-    let mut builder = Response::builder()
-        .status(StatusCode::TOO_MANY_REQUESTS)
-        .header("Content-Type", "application/json")
-        .header("X-RateLimit-Remaining", result.remaining.to_string())
-        .header("Retry-After", retry_after.as_secs().to_string());
+    let error = BarnacleError::rate_limit_exceeded(
+        result.remaining,
+        retry_after_secs,
+        config.max_requests,
+    );
 
-    if let Some(retry_after) = result.retry_after {
-        builder = builder.header("X-RateLimit-Reset", retry_after.as_secs().to_string());
-    }
-
-    builder
-        .body(Body::from(format!(
-            r#"{{"error": "Rate limit exceeded", "retry_after": {}, "remaining": {}}}"#,
-            retry_after.as_secs(),
-            result.remaining
-        )))
-        .unwrap()
+    error.into_response()
 }
 
 async fn handle_rate_limit_reset<S>(
