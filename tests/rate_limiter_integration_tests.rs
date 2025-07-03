@@ -50,7 +50,6 @@ struct LoginRequest {
 async fn create_test_app() -> (Router, RedisBarnacleStore) {
     // Create Redis store for testing (uses test Redis instance)
     let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
-        .await
         .expect("Failed to create Redis store for testing");
 
     let state = AppState {

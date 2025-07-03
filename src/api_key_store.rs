@@ -31,12 +31,32 @@ pub struct RedisApiKeyStore {
 
 #[cfg(feature = "redis")]
 impl RedisApiKeyStore {
-    pub fn new(pool: Pool, default_config: BarnacleConfig) -> Self {
+    pub fn new(pool: Pool) -> Self {
         Self {
             pool,
-            default_config,
+            default_config: BarnacleConfig::default(),
             key_prefix: "barnacle:api_keys".to_string(),
         }
+    }
+
+    pub fn new_with_config(pool: Pool, config: BarnacleConfig) -> Self {
+        Self {
+            pool,
+            default_config: config,
+            key_prefix: "barnacle:api_keys".to_string(),
+        }
+    }
+
+    pub fn from_url(url: &str) -> Result<Self, deadpool_redis::PoolError> {
+        let cfg = deadpool_redis::Config::from_url(url);
+        let pool = cfg
+            .create_pool(Some(deadpool_redis::Runtime::Tokio1))
+            .map_err(|e| {
+                deadpool_redis::PoolError::Backend(deadpool_redis::redis::RedisError::from(
+                    std::io::Error::new(std::io::ErrorKind::Other, e),
+                ))
+            })?;
+        Ok(Self::new(pool))
     }
 
     pub fn with_key_prefix(mut self, prefix: String) -> Self {
@@ -55,6 +75,28 @@ impl RedisApiKeyStore {
     fn get_config_key(&self, api_key: &str) -> String {
         format!("{}:config:{}", self.key_prefix, api_key)
     }
+
+    pub async fn save_key(
+        &self,
+        api_key: &str,
+        config: Option<&BarnacleConfig>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let redis_key = self.get_redis_key(api_key);
+        let config_key = self.get_config_key(api_key);
+
+        tracing::debug!("Saving API key: {}", api_key);
+
+        let mut conn = self.get_connection().await?;
+
+        conn.set::<_, _, ()>(&redis_key, 1).await?;
+
+        if let Some(cfg) = config {
+            let config_json = serde_json::to_string(cfg)?;
+            conn.set::<_, _, ()>(&config_key, config_json).await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "redis")]
@@ -63,6 +105,8 @@ impl ApiKeyStore for RedisApiKeyStore {
     async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
         let redis_key = self.get_redis_key(api_key);
         let config_key = self.get_config_key(api_key);
+
+        tracing::debug!("Validating API key: {}", api_key);
 
         let mut conn = match self.get_connection().await {
             Ok(conn) => conn,
@@ -82,7 +126,7 @@ impl ApiKeyStore for RedisApiKeyStore {
         };
 
         if !key_exists {
-            tracing::debug!("API key not found: {}", api_key);
+            tracing::warn!("API key not found: {}", api_key);
             return ApiKeyValidationResult::invalid();
         }
 

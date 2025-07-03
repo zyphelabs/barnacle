@@ -33,7 +33,7 @@ impl RedisBarnacleStoreInner {
     fn get_redis_key(&self, context: &BarnacleContext) -> String {
         let base_key = match &context.key {
             BarnacleKey::Email(email) => format!("barnacle:email:{}", email),
-            BarnacleKey::ApiKey(api_key) => format!("barnacle:api_key:{}", api_key),
+            BarnacleKey::ApiKey(api_key) => format!("barnacle:api_keys:{}", api_key),
             BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
             BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
         };
@@ -61,7 +61,7 @@ impl RedisBarnacleStore {
     }
 
     /// Create a new Redis store from a Redis URL
-    pub async fn from_url(url: &str) -> Result<Self, deadpool_redis::PoolError> {
+    pub fn from_url(url: &str) -> Result<Self, deadpool_redis::PoolError> {
         let cfg = deadpool_redis::Config::from_url(url);
         let pool = cfg
             .create_pool(Some(deadpool_redis::Runtime::Tokio1))
@@ -101,6 +101,13 @@ impl BarnacleStore for RedisBarnacleStore {
     ) -> BarnacleResult {
         let redis_key = self.inner.get_redis_key(context);
         let window_seconds = config.window.as_secs() as usize;
+
+        tracing::debug!(
+            "Rate limit increment for key: {}, max_requests: {}, window: {}s",
+            redis_key,
+            config.max_requests,
+            window_seconds
+        );
 
         // Get Redis connection from pool
         let mut conn = match self.inner.get_connection().await {
@@ -144,6 +151,13 @@ impl BarnacleStore for RedisBarnacleStore {
         let current_count = current_count.unwrap_or(0);
         let ttl = ttl.max(0) as u32;
 
+        tracing::debug!(
+            "Current count: {}, TTL: {}, max_requests: {}",
+            current_count,
+            ttl,
+            config.max_requests
+        );
+
         // Check if we're within the rate limit
         if current_count >= config.max_requests {
             // Rate limit exceeded
@@ -152,6 +166,14 @@ impl BarnacleStore for RedisBarnacleStore {
             } else {
                 config.window
             };
+
+            tracing::warn!(
+                "Rate limit exceeded for key: {}, current: {}, max: {}, retry_after: {}s",
+                redis_key,
+                current_count,
+                config.max_requests,
+                retry_after.as_secs()
+            );
 
             return BarnacleResult {
                 allowed: false,
@@ -179,9 +201,18 @@ impl BarnacleStore for RedisBarnacleStore {
             let _: Result<(), _> = conn.expire(&redis_key, window_seconds as i64).await;
         }
 
+        let remaining = config.max_requests.saturating_sub(new_count);
+
+        tracing::debug!(
+            "Rate limit increment successful for key: {}, new_count: {}, remaining: {}",
+            redis_key,
+            new_count,
+            remaining
+        );
+
         BarnacleResult {
             allowed: true,
-            remaining: config.max_requests.saturating_sub(new_count),
+            remaining,
             retry_after: None,
         }
     }

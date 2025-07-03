@@ -7,7 +7,7 @@ use tower::{Layer, Service};
 
 use crate::api_key_store::ApiKeyStore;
 use crate::types::{ApiKeyMiddlewareConfig, BarnacleContext, BarnacleKey};
-use crate::{BarnacleConfig, BarnacleStore};
+use crate::{BarnacleConfig, BarnacleStore, ResetOnSuccess};
 
 /// Layer for API key validation and rate limiting
 pub struct ApiKeyLayer<A, S> {
@@ -112,16 +112,13 @@ where
         Box::pin(async move {
             let headers = req.headers();
 
-            // Extract API key from headers
             let api_key = extract_api_key(headers, &config.header_name);
 
-            // Handle missing API key
             if api_key.is_none() && config.require_api_key {
                 tracing::warn!("API key missing in header: {}", config.header_name);
                 return Ok(create_unauthorized_response("API key required"));
             }
 
-            // If we have an API key, validate it
             if let Some(api_key) = api_key {
                 let validation_result = api_key_store.validate_key(&api_key).await;
 
@@ -151,7 +148,7 @@ where
                     .await;
 
                 if !rate_limit_result.allowed {
-                    tracing::debug!(
+                    tracing::warn!(
                         "Rate limit exceeded for API key: {}, remaining: {}, retry_after: {:?}",
                         api_key,
                         rate_limit_result.remaining,
@@ -184,12 +181,19 @@ where
                     }
                 }
 
-                // Handle rate limit reset on success if configured
+                let status_code = response.status().as_u16();
+                tracing::trace!(
+                    "Checking rate limit reset for key: {}, status_code: {}, reset_on_success: {:?}",
+                    api_key,
+                    status_code,
+                    rate_limit_config.reset_on_success
+                );
+
                 handle_rate_limit_reset(
                     &rate_limit_store,
                     &rate_limit_config,
                     &context,
-                    response.status().as_u16(),
+                    status_code,
                 )
                 .await;
 
@@ -252,6 +256,10 @@ async fn handle_rate_limit_reset<S>(
 ) where
     S: BarnacleStore + 'static,
 {
+    if config.reset_on_success == ResetOnSuccess::Not {
+        return;
+    }
+
     if config.is_success_status(status_code) {
         if let Err(e) = store.reset(context).await {
             tracing::warn!(
