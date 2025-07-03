@@ -182,7 +182,7 @@ where
                                 result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
                             tracing::warn!(
                                 "Rate limit exceeded for fallback key: {:?}, retry after {} seconds",
-                                context.key,
+                                context,
                                 retry_after_secs
                             );
                             return Ok(create_rate_limit_response(result, &config));
@@ -216,9 +216,9 @@ where
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::debug!(
+                tracing::warn!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    rate_limit_context.key,
+                    rate_limit_context,
                     retry_after_secs
                 );
 
@@ -227,7 +227,7 @@ where
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                rate_limit_context.key,
+                rate_limit_context,
                 result.remaining,
                 result.retry_after
             );
@@ -320,9 +320,9 @@ where
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::debug!(
+                tracing::warn!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    context.key,
+                    context,
                     retry_after_secs
                 );
 
@@ -331,7 +331,7 @@ where
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                context.key,
+                context,
                 result.remaining,
                 result.retry_after
             );
