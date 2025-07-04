@@ -26,8 +26,9 @@ pub trait ApiKeyStore: Send + Sync {
         &self,
         api_key: &str,
         config: &BarnacleConfig,
+        ttl_seconds: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let _ = (api_key, config);
+        let _ = (api_key, config, ttl_seconds);
         Ok(()) // Default: do nothing
     }
 }
@@ -91,19 +92,24 @@ impl RedisApiKeyStore {
         &self,
         api_key: &str,
         config: Option<&BarnacleConfig>,
+        ttl_seconds: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let redis_key = self.get_redis_key(api_key);
         let config_key = self.get_config_key(api_key);
+        let default_ttl: u64 = 24 * 60 * 60; // 24 hours
+        let ttl_api_key_secs: u64 = ttl_seconds.unwrap_or(default_ttl);
 
         tracing::debug!("Saving API key: {}", api_key);
 
         let mut conn = self.get_connection().await?;
 
-        conn.set::<_, _, ()>(&redis_key, 1).await?;
+        conn.set_ex::<_, _, ()>(&redis_key, 1, ttl_api_key_secs)
+            .await?;
 
         if let Some(cfg) = config {
             let config_json = serde_json::to_string(cfg)?;
-            conn.set::<_, _, ()>(&config_key, config_json).await?;
+            conn.set_ex::<_, _, ()>(&config_key, config_json, ttl_api_key_secs)
+                .await?;
         }
 
         Ok(())
@@ -120,6 +126,7 @@ impl RedisApiKeyStore {
         api_key: &str,
         validator: F,
         config: Option<&BarnacleConfig>,
+        ttl_seconds: Option<u64>,
     ) -> Result<ApiKeyValidationResult, E>
     where
         F: FnOnce(String) -> Fut,
@@ -149,7 +156,10 @@ impl RedisApiKeyStore {
                     .cloned()
                     .unwrap_or_else(|| self.default_config.clone());
 
-                if let Err(e) = self.save_key(api_key, Some(&rate_limit_config)).await {
+                if let Err(e) = self
+                    .save_key(api_key, Some(&rate_limit_config), ttl_seconds)
+                    .await
+                {
                     tracing::warn!("Failed to cache API key in Redis: {}", e);
                     // Continue even if caching fails
                 }
@@ -168,6 +178,31 @@ impl RedisApiKeyStore {
                 Ok(ApiKeyValidationResult::invalid())
             }
         }
+    }
+
+    /// Invalidates all API keys from the Redis cache
+    /// This is useful when API keys are modified in the database
+    pub async fn invalidate_all_keys(
+        &self,
+    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+        tracing::trace!("Invalidating all API keys from Redis cache");
+
+        let mut conn = self.get_connection().await?;
+
+        // Find all keys matching our prefix pattern
+        let pattern = format!("{}:*", self.key_prefix);
+        let keys: Vec<String> = conn.keys(&pattern).await?;
+
+        if keys.is_empty() {
+            tracing::debug!("No API keys found to invalidate");
+            return Ok(0);
+        }
+
+        // Delete all found keys
+        let deleted_count: u32 = conn.del(&keys).await?;
+
+        tracing::debug!("Invalidated {} API key cache entries", deleted_count);
+        Ok(deleted_count)
     }
 }
 
@@ -244,8 +279,9 @@ impl ApiKeyStore for RedisApiKeyStore {
         &self,
         api_key: &str,
         config: &BarnacleConfig,
+        ttl_seconds: Option<u64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.save_key(api_key, Some(config)).await
+        self.save_key(api_key, Some(config), ttl_seconds).await
     }
 }
 

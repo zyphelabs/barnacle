@@ -89,6 +89,129 @@ impl RedisBarnacleStore {
             })?;
         Ok(Self::new(pool))
     }
+
+    pub async fn check_and_increment(
+        &self,
+        context: &BarnacleContext,
+        config: &BarnacleConfig,
+    ) -> BarnacleResult {
+        let redis_key = self.inner.get_redis_key(context);
+        let window_seconds = config.window.as_secs() as usize;
+
+        tracing::debug!(
+            "Rate limit check and increment for key: {}, max_requests: {}, window: {}s",
+            redis_key,
+            config.max_requests,
+            window_seconds
+        );
+
+        // Get Redis connection from pool
+        let mut conn = match self.inner.get_connection().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                // If Redis pool is exhausted or unavailable, log the error and deny the request for safety
+                tracing::error!("Redis connection pool error: {}", e);
+                return BarnacleResult {
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
+                };
+            }
+        };
+
+        // Get current count and TTL using individual commands
+        let current_count: Option<u32> = match conn.get(&redis_key).await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::error!("Redis get operation failed: {}", e);
+                return BarnacleResult {
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
+                };
+            }
+        };
+
+        let ttl: i32 = match conn.ttl(&redis_key).await {
+            Ok(ttl) => ttl,
+            Err(e) => {
+                tracing::error!("Redis TTL operation failed: {}", e);
+                return BarnacleResult {
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
+                };
+            }
+        };
+
+        let current_count = current_count.unwrap_or(0);
+        let ttl = ttl.max(0) as u32;
+
+        tracing::debug!(
+            "Current count: {}, TTL: {}, max_requests: {}",
+            current_count,
+            ttl,
+            config.max_requests
+        );
+
+        // Check if we're within the rate limit
+        if current_count >= config.max_requests {
+            // Rate limit exceeded
+            let retry_after = if ttl > 0 {
+                Duration::from_secs(ttl as u64)
+            } else {
+                config.window
+            };
+
+            tracing::warn!(
+                "Rate limit exceeded for key: {}, current: {}, max: {}, retry_after: {}s",
+                redis_key,
+                current_count,
+                config.max_requests,
+                retry_after.as_secs()
+            );
+
+            return BarnacleResult {
+                allowed: false,
+                remaining: 0,
+                retry_after: Some(retry_after),
+            };
+        }
+
+        // Increment the counter since we're within the limit
+        let new_count: u32 = match conn.incr(&redis_key, 1).await {
+            Ok(count) => count,
+            Err(e) => {
+                // If increment fails, log the error and deny the request for safety
+                tracing::error!("Redis increment operation failed: {}", e);
+                return BarnacleResult {
+                    allowed: false,
+                    remaining: 0,
+                    retry_after: Some(config.window),
+                };
+            }
+        };
+
+        // Set expiration if this is the first increment
+        if new_count == 1 {
+            let _: Result<(), _> = conn.expire(&redis_key, window_seconds as i64).await;
+        }
+
+        let remaining = config.max_requests.saturating_sub(new_count);
+
+        tracing::debug!(
+            "Rate limit check and increment successful for key: {}, new_count: {}, remaining: {}",
+            redis_key,
+            new_count,
+            remaining
+        );
+
+        BarnacleResult {
+            allowed: true,
+            remaining,
+            retry_after: None,
+        }
+    }
 }
 
 #[cfg(feature = "redis")]

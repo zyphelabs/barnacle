@@ -172,8 +172,9 @@ where
                             );
 
                             // 3. Try to save to main store for future requests
+                            // TODO: Add TTL to the cache
                             if let Err(e) = api_key_store
-                                .try_cache_key(&api_key, &config.barnacle_config)
+                                .try_cache_key(&api_key, &config.barnacle_config, None)
                                 .await
                             {
                                 tracing::warn!("Failed to cache API key {}: {}", api_key, e);
