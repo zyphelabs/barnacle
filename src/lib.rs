@@ -54,7 +54,10 @@ mod redis_store;
 mod types;
 
 // Re-export key items for easier access
-pub use api_key_middleware::{create_api_key_layer, create_api_key_layer_with_config, ApiKeyLayer};
+pub use api_key_middleware::{
+    create_api_key_layer, create_api_key_layer_with_config,
+    create_api_key_layer_with_custom_validator, ApiKeyLayer,
+};
 pub use api_key_store::{ApiKeyStore, StaticApiKeyStore};
 pub use middleware::{
     create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleLayer, KeyExtractable,
