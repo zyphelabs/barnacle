@@ -163,7 +163,7 @@ impl RedisBarnacleStore {
                 config.window
             };
 
-            tracing::warn!(
+            tracing::debug!(
                 "Rate limit exceeded for key: {}, current: {}, max: {}, retry_after: {}s",
                 redis_key,
                 current_count,
@@ -290,7 +290,7 @@ impl BarnacleStore for RedisBarnacleStore {
                 config.window
             };
 
-            tracing::warn!(
+            tracing::debug!(
                 "Rate limit exceeded for key: {}, current: {}, max: {}, retry_after: {}s",
                 redis_key,
                 current_count,
