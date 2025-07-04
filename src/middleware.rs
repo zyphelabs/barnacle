@@ -216,7 +216,7 @@ where
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::warn!(
+                tracing::debug!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
                     rate_limit_context,
                     retry_after_secs
@@ -320,7 +320,7 @@ where
 
             if !result.allowed {
                 let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::warn!(
+                tracing::debug!(
                     "Rate limit exceeded for key: {:?}, retry after {} seconds",
                     context,
                     retry_after_secs
@@ -376,14 +376,11 @@ fn create_rate_limit_response(
     result: crate::types::BarnacleResult,
     config: &BarnacleConfig,
 ) -> Response<Body> {
-    let retry_after = result
-        .retry_after
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|| "60".to_string());
+    let retry_after = result.retry_after.unwrap_or(config.window);
 
     Response::builder()
         .status(429)
-        .header("Retry-After", retry_after)
+        .header("Retry-After", retry_after.as_secs().to_string())
         .header("X-RateLimit-Remaining", "0")
         .header("X-RateLimit-Limit", config.max_requests.to_string())
         .body(Body::from("Rate limit exceeded"))

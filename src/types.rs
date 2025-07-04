@@ -105,15 +105,33 @@ impl ApiKeyValidationResult {
 #[derive(Clone, Debug)]
 pub struct ApiKeyMiddlewareConfig {
     pub header_name: String,
-    pub default_rate_limit: BarnacleConfig,
+    pub barnacle_config: BarnacleConfig,
     pub require_api_key: bool,
+}
+
+impl ApiKeyMiddlewareConfig {
+    pub fn new(barnacle_config: BarnacleConfig) -> Self {
+        Self {
+            header_name: "x-api-key".to_string(),
+            barnacle_config,
+            require_api_key: true,
+        }
+    }
+
+    pub fn custom(header_name: String, barnacle_config: BarnacleConfig) -> Self {
+        Self {
+            header_name,
+            barnacle_config,
+            require_api_key: true,
+        }
+    }
 }
 
 impl Default for ApiKeyMiddlewareConfig {
     fn default() -> Self {
         Self {
             header_name: "x-api-key".to_string(),
-            default_rate_limit: BarnacleConfig::default(),
+            barnacle_config: BarnacleConfig::default(),
             require_api_key: true,
         }
     }
