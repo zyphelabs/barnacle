@@ -40,7 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create Redis store with connection pooling
     let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379")
-        .await
         .map_err(|e| format!("Failed to create Redis store with connection pool: {}", e))?;
 
     let state = AppState {
