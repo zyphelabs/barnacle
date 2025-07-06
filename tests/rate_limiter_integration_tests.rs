@@ -225,10 +225,10 @@ mod rate_limit {
         let mut responses = Vec::new();
         for i in 1..=6 {
             let response = client
-                .get(&format!("{}/api/strict", base_url))
+                .get(format!("{}/api/strict", base_url))
                 .send()
                 .await
-                .expect(&format!("Request {} failed", i));
+                .unwrap_or_else(|_| panic!("Request {} failed", i));
 
             println!("Request {} status: {:?}", i, response.status());
 
@@ -267,10 +267,10 @@ mod rate_limit {
         let mut responses = Vec::new();
         for i in 1..=6 {
             let response = client
-                .get(&format!("{}/api/moderate", base_url))
+                .get(format!("{}/api/moderate", base_url))
                 .send()
                 .await
-                .expect(&format!("Request {} failed", i));
+                .unwrap_or_else(|_| panic!("Request {} failed", i));
 
             println!("Moderate Request {} status: {:?}", i, response.status());
 
@@ -297,7 +297,7 @@ mod rate_limit {
 
         // Reset the rate limit for user1@example.com, reseting for tests always pass
         let reset_response = client
-            .post(&format!("{}/api/reset/email/user1@example.com", base_url))
+            .post(format!("{}/api/reset/email/user1@example.com", base_url))
             .send()
             .await
             .expect("Reset request failed");
@@ -318,11 +318,11 @@ mod rate_limit {
         });
         for i in 1..=5 {
             let response = client
-                .post(&format!("{}/api/login", base_url))
+                .post(format!("{}/api/login", base_url))
                 .json(&login_data)
                 .send()
                 .await
-                .expect(&format!("Login request {} failed", i));
+                .unwrap_or_else(|_| panic!("Login request {} failed", i));
 
             println!("Failed login {} status: {:?}", i, response.status());
 
@@ -355,7 +355,7 @@ mod rate_limit {
         });
 
         let response = client
-            .post(&format!("{}/api/login", base_url))
+            .post(format!("{}/api/login", base_url))
             .json(&login_data_user2)
             .send()
             .await
