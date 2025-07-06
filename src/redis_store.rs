@@ -95,7 +95,7 @@ impl RedisBarnacleStore {
         &self,
         context: &BarnacleContext,
         config: &BarnacleConfig,
-    ) -> BarnacleResult {
+    ) -> Result<BarnacleResult, BarnacleError> {
         let redis_key = self.inner.get_redis_key(context);
         let window_seconds = config.window.as_secs() as usize;
 
@@ -107,43 +107,18 @@ impl RedisBarnacleStore {
         );
 
         // Get Redis connection from pool
-        let mut conn = match self.inner.get_connection().await {
-            Ok(conn) => conn,
-            Err(e) => {
-                // If Redis pool is exhausted or unavailable, log the error and deny the request for safety
-                tracing::error!("Redis connection pool error: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let mut conn = self.inner.get_connection().await.map_err(|e| {
+            BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e))
+        })?;
 
         // Get current count and TTL using individual commands
-        let current_count: Option<u32> = match conn.get(&redis_key).await {
-            Ok(count) => count,
-            Err(e) => {
-                tracing::error!("Redis get operation failed: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let current_count: Option<u32> = conn.get(&redis_key).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Redis get operation failed", Box::new(e))
+        })?;
 
-        let ttl: i32 = match conn.ttl(&redis_key).await {
-            Ok(ttl) => ttl,
-            Err(e) => {
-                tracing::error!("Redis TTL operation failed: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let ttl: i32 = conn.ttl(&redis_key).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Redis TTL operation failed", Box::new(e))
+        })?;
 
         let current_count = current_count.unwrap_or(0);
         let ttl = ttl.max(0) as u32;
@@ -172,26 +147,17 @@ impl RedisBarnacleStore {
                 retry_after.as_secs()
             );
 
-            return BarnacleResult {
-                allowed: false,
-                remaining: 0,
-                retry_after: Some(retry_after),
-            };
+            return Err(BarnacleError::rate_limit_exceeded(
+                0,
+                retry_after.as_secs(),
+                config.max_requests,
+            ));
         }
 
         // Increment the counter since we're within the limit
-        let new_count: u32 = match conn.incr(&redis_key, 1).await {
-            Ok(count) => count,
-            Err(e) => {
-                // If increment fails, log the error and deny the request for safety
-                tracing::error!("Redis increment operation failed: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let new_count: u32 = conn.incr(&redis_key, 1).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Redis increment operation failed", Box::new(e))
+        })?;
 
         // Set expiration if this is the first increment
         if new_count == 1 {
@@ -207,11 +173,11 @@ impl RedisBarnacleStore {
             remaining
         );
 
-        BarnacleResult {
+        Ok(BarnacleResult {
             allowed: true,
             remaining,
             retry_after: None,
-        }
+        })
     }
 }
 
@@ -222,7 +188,7 @@ impl BarnacleStore for RedisBarnacleStore {
         &self,
         context: &BarnacleContext,
         config: &BarnacleConfig,
-    ) -> BarnacleResult {
+    ) -> Result<BarnacleResult, BarnacleError> {
         let redis_key = self.inner.get_redis_key(context);
         let window_seconds = config.window.as_secs() as usize;
 
@@ -234,43 +200,18 @@ impl BarnacleStore for RedisBarnacleStore {
         );
 
         // Get Redis connection from pool
-        let mut conn = match self.inner.get_connection().await {
-            Ok(conn) => conn,
-            Err(e) => {
-                // If Redis pool is exhausted or unavailable, log the error and deny the request for safety
-                tracing::error!("Redis connection pool error: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let mut conn = self.inner.get_connection().await.map_err(|e| {
+            BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e))
+        })?;
 
         // Get current count and TTL using individual commands
-        let current_count: Option<u32> = match conn.get(&redis_key).await {
-            Ok(count) => count,
-            Err(e) => {
-                tracing::error!("Redis get operation failed: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let current_count: Option<u32> = conn.get(&redis_key).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Redis get operation failed", Box::new(e))
+        })?;
 
-        let ttl: i32 = match conn.ttl(&redis_key).await {
-            Ok(ttl) => ttl,
-            Err(e) => {
-                tracing::error!("Redis TTL operation failed: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let ttl: i32 = conn.ttl(&redis_key).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Redis TTL operation failed", Box::new(e))
+        })?;
 
         let current_count = current_count.unwrap_or(0);
         let ttl = ttl.max(0) as u32;
@@ -299,26 +240,17 @@ impl BarnacleStore for RedisBarnacleStore {
                 retry_after.as_secs()
             );
 
-            return BarnacleResult {
-                allowed: false,
-                remaining: 0,
-                retry_after: Some(retry_after),
-            };
+            return Err(BarnacleError::rate_limit_exceeded(
+                0,
+                retry_after.as_secs(),
+                config.max_requests,
+            ));
         }
 
         // Increment the counter
-        let new_count: u32 = match conn.incr(&redis_key, 1).await {
-            Ok(count) => count,
-            Err(e) => {
-                // If increment fails, log the error and deny the request for safety
-                tracing::error!("Redis increment operation failed: {}", e);
-                return BarnacleResult {
-                    allowed: false,
-                    remaining: 0,
-                    retry_after: Some(config.window),
-                };
-            }
-        };
+        let new_count: u32 = conn.incr(&redis_key, 1).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Redis increment operation failed", Box::new(e))
+        })?;
 
         // Set expiration if this is the first increment
         if new_count == 1 {
@@ -334,21 +266,23 @@ impl BarnacleStore for RedisBarnacleStore {
             remaining
         );
 
-        BarnacleResult {
+        Ok(BarnacleResult {
             allowed: true,
             remaining,
             retry_after: None,
-        }
+        })
     }
 
     async fn reset(&self, context: &BarnacleContext) -> Result<(), BarnacleError> {
         let redis_key = self.inner.get_redis_key(context);
 
-        let mut conn = self.inner.get_connection().await
-            .map_err(|e| BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e)))?;
-        
-        let _: () = conn.del(&redis_key).await
-            .map_err(|e| BarnacleError::connection_pool_error("Failed to delete key from Redis", Box::new(e)))?;
+        let mut conn = self.inner.get_connection().await.map_err(|e| {
+            BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e))
+        })?;
+
+        let _: () = conn.del(&redis_key).await.map_err(|e| {
+            BarnacleError::connection_pool_error("Failed to delete key from Redis", Box::new(e))
+        })?;
 
         Ok(())
     }

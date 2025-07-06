@@ -294,6 +294,14 @@ impl BarnacleError {
     }
 }
 
+/// Helper function to safely convert values to HeaderValue
+fn to_header_value<T: ToString>(value: T) -> axum::http::HeaderValue {
+    value
+        .to_string()
+        .parse()
+        .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0"))
+}
+
 /// Implement IntoResponse for Axum integration
 impl IntoResponse for BarnacleError {
     fn into_response(self) -> Response {
@@ -311,24 +319,22 @@ impl IntoResponse for BarnacleError {
         } = &self
         {
             let headers = response.headers_mut();
-            headers.insert(
-                "X-RateLimit-Remaining",
-                remaining.to_string().parse().unwrap(),
-            );
-            headers.insert("X-RateLimit-Limit", limit.to_string().parse().unwrap());
-            headers.insert("Retry-After", retry_after.to_string().parse().unwrap());
-            headers.insert(
-                "X-RateLimit-Reset",
-                retry_after.to_string().parse().unwrap(),
-            );
+            headers.insert("X-RateLimit-Remaining", to_header_value(remaining));
+            headers.insert("X-RateLimit-Limit", to_header_value(limit));
+            headers.insert("Retry-After", to_header_value(retry_after));
+            headers.insert("X-RateLimit-Reset", to_header_value(retry_after));
         }
 
         // Add retry-after header for retryable errors
         if let Some(retry_after) = self.retry_after() {
             response
                 .headers_mut()
-                .insert("Retry-After", retry_after.to_string().parse().unwrap());
+                .insert("Retry-After", to_header_value(retry_after));
         }
+
+        response
+            .headers_mut()
+            .insert("X-Barnacle-Error", to_header_value("true"));
 
         response
     }

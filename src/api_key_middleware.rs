@@ -201,9 +201,16 @@ where
                 };
 
                 // Check rate limit
-                let rate_limit_result = rate_limit_store
+                let rate_limit_result = match rate_limit_store
                     .increment(&context, &rate_limit_config)
-                    .await;
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        tracing::debug!("Rate limit store error: {}", e);
+                        return Ok(e.into_response());
+                    }
+                };
 
                 if !rate_limit_result.allowed {
                     let retry_after_secs = rate_limit_result
@@ -361,9 +368,16 @@ where
                 };
 
                 // Check rate limit
-                let rate_limit_result = rate_limit_store
+                let rate_limit_result = match rate_limit_store
                     .increment(&context, &rate_limit_config)
-                    .await;
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        tracing::debug!("Rate limit store error: {}", e);
+                        return Ok(e.into_response());
+                    }
+                };
 
                 if !rate_limit_result.allowed {
                     let retry_after_secs = rate_limit_result

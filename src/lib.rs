@@ -28,10 +28,7 @@
 //!     .create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
 //!
 //! #[cfg(feature = "redis")]
-//! let api_key_store = RedisApiKeyStore::new(
-//!     redis_pool.clone(),
-//!     BarnacleConfig::default()
-//! );
+//! let api_key_store = RedisApiKeyStore::new(redis_pool.clone());
 //! #[cfg(feature = "redis")]
 //! let rate_limit_store = RedisBarnacleStore::new(redis_pool);
 //!
@@ -93,7 +90,7 @@ pub trait BarnacleStore: Send + Sync {
         &self,
         context: &BarnacleContext,
         config: &BarnacleConfig,
-    ) -> types::BarnacleResult;
+    ) -> Result<types::BarnacleResult, BarnacleError>;
     /// Resets the counter for the key (e.g., after successful login).
     async fn reset(&self, context: &BarnacleContext) -> Result<(), BarnacleError>;
 }

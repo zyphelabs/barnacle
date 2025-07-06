@@ -4,6 +4,7 @@ use deadpool_redis::redis::AsyncCommands;
 #[cfg(feature = "redis")]
 use deadpool_redis::{Connection, Pool};
 
+use crate::error::BarnacleError;
 use crate::types::{ApiKeyValidationResult, BarnacleConfig, StaticApiKeyConfig};
 
 /// Trait for API key validation and configuration retrieval
@@ -27,7 +28,7 @@ pub trait ApiKeyStore: Send + Sync {
         api_key: &str,
         config: &BarnacleConfig,
         ttl_seconds: Option<u64>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), BarnacleError> {
         let _ = (api_key, config, ttl_seconds);
         Ok(()) // Default: do nothing
     }
@@ -93,7 +94,7 @@ impl RedisApiKeyStore {
         api_key: &str,
         config: Option<&BarnacleConfig>,
         ttl_seconds: Option<u64>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), BarnacleError> {
         let redis_key = self.get_redis_key(api_key);
         let config_key = self.get_config_key(api_key);
         let default_ttl: u64 = 24 * 60 * 60; // 24 hours
@@ -101,15 +102,27 @@ impl RedisApiKeyStore {
 
         tracing::debug!("Saving API key: {}", api_key);
 
-        let mut conn = self.get_connection().await?;
+        let mut conn = self.get_connection().await.map_err(|e| {
+            BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e))
+        })?;
 
         conn.set_ex::<_, _, ()>(&redis_key, 1, ttl_api_key_secs)
-            .await?;
+            .await
+            .map_err(|e| {
+                BarnacleError::store_error_with_source("Failed to save API key", Box::new(e))
+            })?;
 
         if let Some(cfg) = config {
-            let config_json = serde_json::to_string(cfg)?;
+            let config_json = serde_json::to_string(cfg)
+                .map_err(|e| BarnacleError::json_error("Failed to serialize config", e))?;
             conn.set_ex::<_, _, ()>(&config_key, config_json, ttl_api_key_secs)
-                .await?;
+                .await
+                .map_err(|e| {
+                    BarnacleError::store_error_with_source(
+                        "Failed to save API key config",
+                        Box::new(e),
+                    )
+                })?;
         }
 
         Ok(())
@@ -182,16 +195,18 @@ impl RedisApiKeyStore {
 
     /// Invalidates all API keys from the Redis cache
     /// This is useful when API keys are modified in the database
-    pub async fn invalidate_all_keys(
-        &self,
-    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn invalidate_all_keys(&self) -> Result<u32, BarnacleError> {
         tracing::trace!("Invalidating all API keys from Redis cache");
 
-        let mut conn = self.get_connection().await?;
+        let mut conn = self.get_connection().await.map_err(|e| {
+            BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e))
+        })?;
 
         // Find all keys matching our prefix pattern
         let pattern = format!("{}:*", self.key_prefix);
-        let keys: Vec<String> = conn.keys(&pattern).await?;
+        let keys: Vec<String> = conn.keys(&pattern).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Failed to get keys pattern", Box::new(e))
+        })?;
 
         if keys.is_empty() {
             tracing::debug!("No API keys found to invalidate");
@@ -199,7 +214,9 @@ impl RedisApiKeyStore {
         }
 
         // Delete all found keys
-        let deleted_count: u32 = conn.del(&keys).await?;
+        let deleted_count: u32 = conn.del(&keys).await.map_err(|e| {
+            BarnacleError::store_error_with_source("Failed to delete keys", Box::new(e))
+        })?;
 
         tracing::debug!("Invalidated {} API key cache entries", deleted_count);
         Ok(deleted_count)
@@ -233,7 +250,7 @@ impl ApiKeyStore for RedisApiKeyStore {
         };
 
         if !key_exists {
-            tracing::warn!("API key not found: {}", api_key);
+            tracing::debug!("API key not found: {}", api_key);
             return ApiKeyValidationResult::invalid();
         }
 
@@ -280,7 +297,7 @@ impl ApiKeyStore for RedisApiKeyStore {
         api_key: &str,
         config: &BarnacleConfig,
         ttl_seconds: Option<u64>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), BarnacleError> {
         self.save_key(api_key, Some(config), ttl_seconds).await
     }
 }
