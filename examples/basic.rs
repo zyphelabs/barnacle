@@ -12,7 +12,6 @@ use barnacle_rs::{
     BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
 };
 use serde::{Deserialize, Serialize};
-use tracing;
 
 impl KeyExtractable for LoginRequest {
     fn extract_key(&self) -> BarnacleKey {

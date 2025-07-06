@@ -74,6 +74,26 @@ where
     }
 }
 
+// Implementation for the case without custom validator (C = ())
+impl<Inner, A, S> Layer<Inner> for ApiKeyLayer<A, S, ()>
+where
+    A: ApiKeyStore + 'static,
+    S: BarnacleStore + 'static,
+{
+    type Service = ApiKeyMiddleware<Inner, A, S, ()>;
+
+    fn layer(&self, inner: Inner) -> Self::Service {
+        ApiKeyMiddleware {
+            inner,
+            api_key_store: self.api_key_store.clone(),
+            rate_limit_store: self.rate_limit_store.clone(),
+            custom_validator: self.custom_validator.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
+
+// Implementation for the case with custom validator (C: ApiKeyStore)
 impl<Inner, A, S, C> Layer<Inner> for ApiKeyLayer<A, S, C>
 where
     A: ApiKeyStore + 'static,
@@ -117,6 +137,133 @@ where
     }
 }
 
+// Implementation for the case without custom validator (C = ())
+impl<Inner, B, A, S> Service<Request<B>> for ApiKeyMiddleware<Inner, A, S, ()>
+where
+    Inner: Service<Request<B>, Response = Response<Body>> + Clone + Send + 'static,
+    Inner::Future: Send + 'static,
+    B: Send + 'static,
+    A: ApiKeyStore + 'static,
+    S: BarnacleStore + 'static,
+{
+    type Response = Inner::Response;
+    type Error = Inner::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let api_key_store = self.api_key_store.clone();
+        let rate_limit_store = self.rate_limit_store.clone();
+        let config = self.config.clone();
+
+        Box::pin(async move {
+            let headers = req.headers();
+
+            let api_key = extract_api_key(headers, &config.header_name);
+
+            if api_key.is_none() && config.require_api_key {
+                tracing::warn!("API key missing in header: {}", config.header_name);
+                return Ok(create_unauthorized_response("API key required"));
+            }
+
+            if let Some(api_key) = api_key {
+                // Validate the API key
+                let validation_result = api_key_store.validate_key(&api_key).await;
+
+                if !validation_result.valid {
+                    tracing::warn!("Invalid API key: {}", api_key);
+                    return Ok(create_unauthorized_response("Invalid API key"));
+                }
+
+                // Get rate limit configuration for this key
+                let rate_limit_config = validation_result
+                    .rate_limit_config
+                    .unwrap_or_else(|| config.barnacle_config.clone());
+
+                // Create rate limiting key
+                let rate_limit_key = BarnacleKey::ApiKey(api_key.clone());
+
+                // Create context with route information
+                let context = BarnacleContext {
+                    key: rate_limit_key,
+                    path: req.uri().path().to_string(),
+                    method: req.method().as_str().to_string(),
+                };
+
+                // Check rate limit
+                let rate_limit_result = rate_limit_store
+                    .increment(&context, &rate_limit_config)
+                    .await;
+
+                if !rate_limit_result.allowed {
+                    let retry_after_secs = rate_limit_result
+                        .retry_after
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    tracing::warn!(
+                        "Rate limit exceeded for API key: {}, retry after {} seconds",
+                        api_key,
+                        retry_after_secs
+                    );
+                    return Ok(create_rate_limit_response(
+                        rate_limit_result,
+                        &rate_limit_config,
+                    ));
+                }
+
+                tracing::debug!(
+                    "API key validation and rate limit check passed for: {}, remaining: {}",
+                    api_key,
+                    rate_limit_result.remaining
+                );
+
+                let mut response = inner.call(req).await?;
+
+                let headers = response.headers_mut();
+                if let Ok(remaining_header) = rate_limit_result.remaining.to_string().parse() {
+                    headers.insert("X-RateLimit-Remaining", remaining_header);
+                }
+                if let Ok(limit_header) = rate_limit_config.max_requests.to_string().parse() {
+                    headers.insert("X-RateLimit-Limit", limit_header);
+                }
+                if let Some(retry_after) = rate_limit_result.retry_after {
+                    if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
+                        headers.insert("X-RateLimit-Reset", reset_header);
+                    }
+                }
+
+                let status_code = response.status().as_u16();
+                tracing::trace!(
+                    "Checking rate limit reset for key: {}, status_code: {}, reset_on_success: {:?}",
+                    api_key,
+                    status_code,
+                    rate_limit_config.reset_on_success
+                );
+
+                handle_rate_limit_reset(
+                    &rate_limit_store,
+                    &rate_limit_config,
+                    &context,
+                    status_code,
+                )
+                .await;
+
+                Ok(response)
+            } else {
+                // No API key required, continue without validation
+                inner.call(req).await
+            }
+        })
+    }
+}
+
+// Implementation for the case with custom validator (C: ApiKeyStore)
 impl<Inner, B, A, S, C> Service<Request<B>> for ApiKeyMiddleware<Inner, A, S, C>
 where
     Inner: Service<Request<B>, Response = Response<Body>> + Clone + Send + 'static,

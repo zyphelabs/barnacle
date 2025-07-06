@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use axum::{Router, http::StatusCode, response::Json, routing::get};
-use barnacle_rs::{BarnacleConfig, RedisApiKeyStore, RedisBarnacleStore, create_api_key_layer};
+use axum::{http::StatusCode, response::Json, routing::get, Router};
+use barnacle_rs::{create_api_key_layer, BarnacleConfig, RedisApiKeyStore, RedisBarnacleStore};
 use deadpool_redis::Config as RedisConfig;
 use serde_json::json;
 
@@ -91,7 +91,7 @@ async fn create_test_app() -> Router {
             .expect("Failed to set second config");
     }
 
-    let api_key_store = RedisApiKeyStore::new(pool.clone(), BarnacleConfig::default());
+    let api_key_store = RedisApiKeyStore::new(pool.clone());
     let rate_limit_store = RedisBarnacleStore::new(pool);
     let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
 
@@ -221,7 +221,7 @@ mod api_keys {
             .create_pool(None)
             .expect("Failed to create Redis pool");
 
-        let api_key_store = RedisApiKeyStore::new(pool.clone(), BarnacleConfig::default());
+        let api_key_store = RedisApiKeyStore::new(pool.clone());
         let rate_limit_store = RedisBarnacleStore::new(pool);
         let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
 

@@ -28,7 +28,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
 
     let store = RedisBarnacleStore::from_url(&redis_url)
-        .await
         .map_err(|e| format!("Failed to create Redis store: {}", e))?;
 
     // Create a separate API key store with its own pool
@@ -38,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Configure rate limiting - NO reset on success
     let config = ApiKeyMiddlewareConfig {
         header_name: "x-api-key".to_string(),
-        default_rate_limit: BarnacleConfig {
+        barnacle_config: BarnacleConfig {
             max_requests: 3,
             window: Duration::from_secs(60),
             reset_on_success: ResetOnSuccess::Not, // This is the key change
@@ -48,11 +47,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Save a test API key to Redis with the same config
     api_key_store
-        .save_key("test_key_123", Some(&config.default_rate_limit))
+        .save_key("test_key_123", Some(&config.barnacle_config), Some(30))
         .await
         .unwrap();
 
-    tracing::info!("Saved API key with config: {:?}", config.default_rate_limit);
+    tracing::info!("Saved API key with config: {:?}", config.barnacle_config);
 
     let middleware = create_api_key_layer_with_config(api_key_store, store, config);
 
