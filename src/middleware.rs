@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::Response;
+use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
@@ -8,6 +9,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
+use crate::error::BarnacleError;
 use crate::types::ResetOnSuccess;
 use crate::{
     types::{BarnacleConfig, BarnacleContext, BarnacleKey},
@@ -376,15 +378,12 @@ fn create_rate_limit_response(
     result: crate::types::BarnacleResult,
     config: &BarnacleConfig,
 ) -> Response<Body> {
-    let retry_after = result.retry_after.unwrap_or(config.window);
+    let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(60);
 
-    Response::builder()
-        .status(429)
-        .header("Retry-After", retry_after.as_secs().to_string())
-        .header("X-RateLimit-Remaining", "0")
-        .header("X-RateLimit-Limit", config.max_requests.to_string())
-        .body(Body::from("Rate limit exceeded"))
-        .expect("Failed to build rate limit response")
+    let error =
+        BarnacleError::rate_limit_exceeded(result.remaining, retry_after_secs, config.max_requests);
+
+    error.into_response()
 }
 
 /// Helper function to handle rate limit reset logic

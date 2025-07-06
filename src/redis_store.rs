@@ -11,6 +11,7 @@ use deadpool_redis::redis::AsyncCommands;
 use deadpool_redis::{Connection, Pool};
 
 use crate::{
+    error::BarnacleError,
     types::{BarnacleConfig, BarnacleContext, BarnacleKey, BarnacleResult},
     BarnacleStore,
 };
@@ -340,11 +341,14 @@ impl BarnacleStore for RedisBarnacleStore {
         }
     }
 
-    async fn reset(&self, context: &BarnacleContext) -> anyhow::Result<()> {
+    async fn reset(&self, context: &BarnacleContext) -> Result<(), BarnacleError> {
         let redis_key = self.inner.get_redis_key(context);
 
-        let mut conn = self.inner.get_connection().await?;
-        let _: () = conn.del(&redis_key).await?;
+        let mut conn = self.inner.get_connection().await
+            .map_err(|e| BarnacleError::connection_pool_error("Failed to get Redis connection", Box::new(e)))?;
+        
+        let _: () = conn.del(&redis_key).await
+            .map_err(|e| BarnacleError::connection_pool_error("Failed to delete key from Redis", Box::new(e)))?;
 
         Ok(())
     }
