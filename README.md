@@ -26,7 +26,7 @@ Rate limiting middleware for Axum with Redis backend and API key validation.
 
 ```toml
 [dependencies]
-barnacle-rs = "0.1.2"
+barnacle-rs = "0.2.0"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 ```
@@ -133,6 +133,7 @@ impl KeyExtractable for LoginRequest {
     fn extract_key(&self) -> BarnacleKey {
         BarnacleKey::Email(self.email.clone())
     }
+
 }
 
 let limiter = create_barnacle_layer_for_payload::<LoginRequest>(store, config);
@@ -147,7 +148,7 @@ Barnacle automatically includes route information (path and method) in Redis key
 ```
 barnacle:email:user@example.com:POST:/auth/login
 barnacle:email:user@example.com:POST:/auth/start-reset
-barnacle:api_key:your-key:GET:/api/data
+barnacle:api_keys:your-key:GET:/api/data
 barnacle:ip:192.168.1.1:POST:/api/submit
 ```
 
@@ -170,12 +171,22 @@ redis-cli SET "barnacle:api_keys:your-key" 1
 redis-cli SET "barnacle:api_keys:config:your-key" '{"max_requests":100,"window":3600,"reset_on_success":"Not"}'
 ```
 
+### Error Integration & Custom Validator
+
+For error handling and custom validator implementation, see:
+
+- `examples/error_integration.rs`
+- `examples/custom_validator_example.rs`
+
 ## Examples
 
 ```bash
 # Run examples
 cargo run --example basic
 cargo run --example api_key_redis_test
+cargo run --example custom_validator_example
+cargo run --example error_integration
+cargo run --example api_key_test
 ```
 
 ## License

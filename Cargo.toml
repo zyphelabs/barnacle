@@ -1,8 +1,8 @@
 [package]
 name = "barnacle-rs"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
-description = "Rate limiting middleware for Axum with Key Extractor and API key validation"
+description = "Advanced rate limiting middleware for Axum with Redis backend, API key validation, and custom key extraction"
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/zyphelabs/barnacle-rs"

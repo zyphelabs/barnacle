@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
-use crate::error::BarnacleError;
 use crate::types::ResetOnSuccess;
 use crate::{
     types::{BarnacleConfig, BarnacleContext, BarnacleKey},
@@ -296,7 +295,7 @@ where
         let config = self.config.clone();
 
         Box::pin(async move {
-            let (parts, _body) = req.into_parts();
+            let (parts, body) = req.into_parts();
 
             // For () type, always use fallback key
             let rate_limit_key = get_fallback_key_from_parts(&parts);
@@ -320,8 +319,15 @@ where
                 result.retry_after
             );
 
-            // For () type, we don't need to reconstruct the body
-            let new_req = Request::from_parts(parts, axum::body::Body::empty());
+            // For () type, we need to preserve the original body
+            let new_body = match body.collect().await {
+                Ok(collected) => {
+                    let bytes = collected.to_bytes();
+                    axum::body::Body::from(bytes)
+                }
+                Err(_) => axum::body::Body::empty(),
+            };
+            let new_req = Request::from_parts(parts, new_body);
 
             let response = inner.call(new_req).await?;
 
@@ -353,19 +359,6 @@ where
             Ok(response_with_headers)
         })
     }
-}
-
-/// Helper function to create a rate limit exceeded response
-fn create_rate_limit_response(
-    result: crate::types::BarnacleResult,
-    config: &BarnacleConfig,
-) -> Response<Body> {
-    let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(60);
-
-    let error =
-        BarnacleError::rate_limit_exceeded(result.remaining, retry_after_secs, config.max_requests);
-
-    error.into_response()
 }
 
 /// Helper function to handle rate limit reset logic
