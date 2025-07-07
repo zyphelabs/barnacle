@@ -1,6 +1,6 @@
 [package]
 name = "barnacle-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Advanced rate limiting middleware for Axum with Redis backend, API key validation, and custom key extraction"
 readme = "README.md"
