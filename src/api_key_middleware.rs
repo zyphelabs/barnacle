@@ -212,22 +212,6 @@ where
                     }
                 };
 
-                if !rate_limit_result.allowed {
-                    let retry_after_secs = rate_limit_result
-                        .retry_after
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    tracing::warn!(
-                        "Rate limit exceeded for API key: {}, retry after {} seconds",
-                        api_key,
-                        retry_after_secs
-                    );
-                    return Ok(create_rate_limit_response(
-                        rate_limit_result,
-                        &rate_limit_config,
-                    ));
-                }
-
                 tracing::debug!(
                     "API key validation and rate limit check passed for: {}, remaining: {}",
                     api_key,
@@ -386,22 +370,6 @@ where
                     }
                 };
 
-                if !rate_limit_result.allowed {
-                    let retry_after_secs = rate_limit_result
-                        .retry_after
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    tracing::warn!(
-                        "Rate limit exceeded for fallback key: {:?}, retry after {} seconds",
-                        context,
-                        retry_after_secs
-                    );
-                    return Ok(create_rate_limit_response(
-                        rate_limit_result,
-                        &rate_limit_config,
-                    ));
-                }
-
                 tracing::debug!(
                     "API key validation and rate limit check passed for: {}, remaining: {}",
                     api_key,
@@ -455,18 +423,6 @@ fn extract_api_key(headers: &HeaderMap, header_name: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn create_rate_limit_response(
-    result: crate::types::BarnacleResult,
-    config: &BarnacleConfig,
-) -> Response<Body> {
-    let retry_after_secs = result.retry_after.unwrap_or(config.window).as_secs();
-
-    let error =
-        BarnacleError::rate_limit_exceeded(result.remaining, retry_after_secs, config.max_requests);
-
-    error.into_response()
 }
 
 async fn handle_rate_limit_reset<S>(

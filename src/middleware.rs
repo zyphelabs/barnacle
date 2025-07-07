@@ -186,17 +186,6 @@ where
                             }
                         };
 
-                        if !result.allowed {
-                            let retry_after_secs =
-                                result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                            tracing::warn!(
-                                "Rate limit exceeded for fallback key: {:?}, retry after {} seconds",
-                                context,
-                                retry_after_secs
-                            );
-                            return Ok(create_rate_limit_response(result, &config));
-                        }
-
                         tracing::debug!(
                             "Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
                             context.key,
@@ -228,16 +217,6 @@ where
                     return Ok(e.into_response());
                 }
             };
-
-            if !result.allowed {
-                let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::debug!(
-                    "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    rate_limit_context,
-                    retry_after_secs
-                );
-                return Ok(create_rate_limit_response(result, &config));
-            }
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
@@ -333,17 +312,6 @@ where
                     return Ok(e.into_response());
                 }
             };
-
-            if !result.allowed {
-                let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::debug!(
-                    "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    context,
-                    retry_after_secs
-                );
-
-                return Ok(create_rate_limit_response(result, &config));
-            }
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
