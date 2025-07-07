@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::extract::Request;
 use axum::http::Response;
+use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
@@ -8,6 +9,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
+use crate::error::BarnacleError;
 use crate::types::ResetOnSuccess;
 use crate::{
     types::{BarnacleConfig, BarnacleContext, BarnacleKey},
@@ -176,17 +178,13 @@ where
                             method: parts.method.as_str().to_string(),
                         };
 
-                        let result = store.increment(&context, &config).await;
-                        if !result.allowed {
-                            let retry_after_secs =
-                                result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                            tracing::warn!(
-                                "Rate limit exceeded for fallback key: {:?}, retry after {} seconds",
-                                context,
-                                retry_after_secs
-                            );
-                            return Ok(create_rate_limit_response(result, &config));
-                        }
+                        let result = match store.increment(&context, &config).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::debug!("Rate limit store error: {}", e);
+                                return Ok(e.into_response());
+                            }
+                        };
 
                         tracing::debug!(
                             "Rate limit check passed for fallback key: {:?}, remaining: {}, retry_after: {:?}",
@@ -212,58 +210,49 @@ where
                 }
             };
 
-            let result = store.increment(&rate_limit_context, &config).await;
-
-            if !result.allowed {
-                let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::warn!(
-                    "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    rate_limit_context,
-                    retry_after_secs
-                );
-
-                return Ok(create_rate_limit_response(result, &config));
-            }
+            let result = match store.increment(&rate_limit_context, &config).await {
+                Ok(result) => result,
+                Err(e) => {
+                    tracing::debug!("Rate limit store error: {}", e);
+                    return Ok(e.into_response());
+                }
+            };
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
-                rate_limit_context,
+                rate_limit_context.key,
                 result.remaining,
                 result.retry_after
             );
 
-            // Reconstruct the request
-            let new_req = if let Some(bytes) = body_bytes {
-                // For payload types, reconstruct with the body bytes
-                let new_body = axum::body::Body::from(bytes);
-                Request::from_parts(parts, new_body)
-            } else {
-                // For () type, we don't need to reconstruct the body
-                Request::from_parts(parts, axum::body::Body::empty())
+            let reconstructed_body = match body_bytes {
+                Some(bytes) => axum::body::Body::from(bytes),
+                None => axum::body::Body::empty(),
             };
+
+            let new_req = Request::from_parts(parts, reconstructed_body);
 
             let response = inner.call(new_req).await?;
 
             // Add rate limit headers to successful response
             let mut response_with_headers = response;
-            let headers = response_with_headers.headers_mut();
+            {
+                let headers = response_with_headers.headers_mut();
+                if let Ok(remaining_header) = result.remaining.to_string().parse() {
+                    headers.insert("X-RateLimit-Remaining", remaining_header);
+                    tracing::debug!("Added X-RateLimit-Remaining: {}", result.remaining);
+                }
 
-            tracing::debug!(
-                "Adding rate limit headers - remaining: {}, limit: {}",
-                result.remaining,
-                config.max_requests
-            );
+                if let Ok(limit_header) = config.max_requests.to_string().parse() {
+                    headers.insert("X-RateLimit-Limit", limit_header);
+                    tracing::debug!("Added X-RateLimit-Limit: {}", config.max_requests);
+                }
 
-            if let Ok(remaining_header) = result.remaining.to_string().parse() {
-                headers.insert("X-RateLimit-Remaining", remaining_header);
-            }
-            if let Ok(limit_header) = config.max_requests.to_string().parse() {
-                headers.insert("X-RateLimit-Limit", limit_header);
-            }
-            if let Some(retry_after) = result.retry_after {
-                if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
-                    headers.insert("X-RateLimit-Reset", reset_header);
-                    tracing::debug!("Added X-RateLimit-Reset: {}", retry_after.as_secs());
+                if let Some(retry_after) = result.retry_after {
+                    if let Ok(reset_header) = retry_after.as_secs().to_string().parse() {
+                        headers.insert("X-RateLimit-Reset", reset_header);
+                        tracing::debug!("Added X-RateLimit-Reset: {}", retry_after.as_secs());
+                    }
                 }
             }
 
@@ -316,18 +305,13 @@ where
                 path: parts.uri.path().to_string(),
                 method: parts.method.as_str().to_string(),
             };
-            let result = store.increment(&context, &config).await;
-
-            if !result.allowed {
-                let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(0);
-                tracing::warn!(
-                    "Rate limit exceeded for key: {:?}, retry after {} seconds",
-                    context,
-                    retry_after_secs
-                );
-
-                return Ok(create_rate_limit_response(result, &config));
-            }
+            let result = match store.increment(&context, &config).await {
+                Ok(result) => result,
+                Err(e) => {
+                    tracing::debug!("Rate limit store error: {}", e);
+                    return Ok(e.into_response());
+                }
+            };
 
             tracing::debug!(
                 "Rate limit check passed for key: {:?}, remaining: {}, retry_after: {:?}",
@@ -376,18 +360,12 @@ fn create_rate_limit_response(
     result: crate::types::BarnacleResult,
     config: &BarnacleConfig,
 ) -> Response<Body> {
-    let retry_after = result
-        .retry_after
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|| "60".to_string());
+    let retry_after_secs = result.retry_after.map(|d| d.as_secs()).unwrap_or(60);
 
-    Response::builder()
-        .status(429)
-        .header("Retry-After", retry_after)
-        .header("X-RateLimit-Remaining", "0")
-        .header("X-RateLimit-Limit", config.max_requests.to_string())
-        .body(Body::from("Rate limit exceeded"))
-        .expect("Failed to build rate limit response")
+    let error =
+        BarnacleError::rate_limit_exceeded(result.remaining, retry_after_secs, config.max_requests);
+
+    error.into_response()
 }
 
 /// Helper function to handle rate limit reset logic

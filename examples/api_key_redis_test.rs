@@ -1,6 +1,6 @@
-use axum::{Json, Router, routing::get};
+use axum::{routing::get, Json, Router};
 use barnacle_rs::RedisBarnacleStore;
-use barnacle_rs::{BarnacleConfig, RedisApiKeyStore, create_api_key_layer};
+use barnacle_rs::{create_api_key_layer, BarnacleConfig, RedisApiKeyStore};
 use deadpool_redis::Config as RedisConfig;
 use serde_json::json;
 use std::net::SocketAddr;
@@ -53,7 +53,7 @@ async fn main() {
                 .arg(1)
                 .query_async(&mut conn)
                 .await
-                .expect(&format!("Failed to set API key: {}", api_key));
+                .unwrap_or_else(|_| panic!("Failed to set API key: {}", api_key));
 
             // Set rate limit configuration
             let config_json = serde_json::to_string(&rate_limit).unwrap();
@@ -62,7 +62,7 @@ async fn main() {
                 .arg(&config_json)
                 .query_async(&mut conn)
                 .await
-                .expect(&format!("Failed to set config for API key: {}", api_key));
+                .unwrap_or_else(|_| panic!("Failed to set config for API key: {}", api_key));
         }
 
         println!("✅ Configured {} API keys in Redis:", api_keys.len());
@@ -76,7 +76,7 @@ async fn main() {
         }
     }
 
-    let api_key_store = RedisApiKeyStore::new(pool.clone(), BarnacleConfig::default());
+    let api_key_store = RedisApiKeyStore::new(pool.clone());
     let rate_limit_store = RedisBarnacleStore::new(pool);
     let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
 

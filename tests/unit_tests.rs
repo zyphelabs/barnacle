@@ -94,7 +94,7 @@ mod basic_unit_tests {
         assert_eq!(long_window.as_secs(), 3600);
 
         // Test that durations work in configs
-        let configs = vec![
+        let configs = [
             BarnacleConfig {
                 max_requests: 100,
                 window: short_window,
