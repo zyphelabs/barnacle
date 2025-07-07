@@ -321,15 +321,8 @@ impl IntoResponse for BarnacleError {
             let headers = response.headers_mut();
             headers.insert("X-RateLimit-Remaining", to_header_value(remaining));
             headers.insert("X-RateLimit-Limit", to_header_value(limit));
-            headers.insert("Retry-After", to_header_value(retry_after));
+            // X-RateLimit-Reset follows Barnacle's convention: seconds until reset (same as Retry-After)
             headers.insert("X-RateLimit-Reset", to_header_value(retry_after));
-        }
-
-        // Add retry-after header for retryable errors
-        if let Some(retry_after) = self.retry_after() {
-            response
-                .headers_mut()
-                .insert("Retry-After", to_header_value(retry_after));
         }
 
         response
