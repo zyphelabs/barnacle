@@ -336,24 +336,6 @@ impl IntoResponse for BarnacleError {
 /// Result type alias for Barnacle operations
 pub type BarnacleResult<T> = Result<T, BarnacleError>;
 
-/// Trait for converting BarnacleError into application-specific error types
-pub trait FromBarnacleError<T>: Sized {
-    /// Convert a BarnacleError into the application's error type
-    fn from_barnacle_error(error: BarnacleError) -> T;
-}
-
-/// Helper macro for implementing FromBarnacleError
-#[macro_export]
-macro_rules! impl_from_barnacle_error {
-    ($app_error:ty, $variant:ident) => {
-        impl $crate::error::FromBarnacleError<$app_error> for $app_error {
-            fn from_barnacle_error(error: $crate::error::BarnacleError) -> $app_error {
-                <$app_error>::$variant(error)
-            }
-        }
-    };
-}
-
 /// Convert from various error types into BarnacleError
 impl From<serde_json::Error> for BarnacleError {
     fn from(err: serde_json::Error) -> Self {

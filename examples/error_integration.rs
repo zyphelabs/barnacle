@@ -4,7 +4,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use barnacle_rs::{BarnacleError, FromBarnacleError};
+use barnacle_rs::BarnacleError;
 use serde_json::json;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -71,15 +71,13 @@ impl IntoResponse for AppError {
     }
 }
 
-// Implement the FromBarnacleError trait to enable easy conversion
-impl FromBarnacleError<AppError> for AppError {
-    fn from_barnacle_error(error: BarnacleError) -> AppError {
-        AppError::RateLimit(error)
-    }
-}
-
-// Alternative: Use the macro for simpler implementation
-// barnacle_rs::impl_from_barnacle_error!(AppError, RateLimit);
+// Use the standard From trait for error conversion
+// Note: We already have #[from] in the enum, but here's how you'd do it manually:
+// impl From<BarnacleError> for AppError {
+//     fn from(error: BarnacleError) -> AppError {
+//         AppError::RateLimit(error)
+//     }
+// }
 
 /// Example handler that might encounter BarnacleError
 async fn protected_handler() -> Result<Json<serde_json::Value>, AppError> {
@@ -92,8 +90,8 @@ async fn protected_handler() -> Result<Json<serde_json::Value>, AppError> {
             "data": data
         }))),
         Err(barnacle_error) => {
-            // Convert BarnacleError to AppError
-            Err(AppError::from_barnacle_error(barnacle_error))
+            // Convert BarnacleError to AppError using the standard From trait
+            Err(barnacle_error.into())
         }
     }
 }

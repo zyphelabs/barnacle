@@ -57,7 +57,7 @@ pub use api_key_middleware::{
     create_api_key_layer_with_custom_validator, ApiKeyLayer,
 };
 pub use api_key_store::{ApiKeyStore, StaticApiKeyStore};
-pub use error::{BarnacleError, BarnacleResult, FromBarnacleError};
+pub use error::{BarnacleError, BarnacleResult};
 pub use middleware::{
     create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleLayer, KeyExtractable,
 };
