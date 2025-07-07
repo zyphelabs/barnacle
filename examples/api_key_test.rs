@@ -43,6 +43,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             reset_on_success: ResetOnSuccess::Not, // This is the key change
         },
         require_api_key: true,
+        cache_ttl_seconds: 60 * 60, // 1 hour cache for this test
     };
 
     // Save a test API key to Redis with the same config

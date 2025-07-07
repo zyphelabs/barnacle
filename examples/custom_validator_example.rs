@@ -106,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             reset_on_success: barnacle_rs::ResetOnSuccess::Not,
         },
         require_api_key: true,
+        cache_ttl_seconds: 30 * 60, // 30 minutes for this example
     };
 
     // Create the layer with custom validator

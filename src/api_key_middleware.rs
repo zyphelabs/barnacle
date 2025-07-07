@@ -331,9 +331,16 @@ where
                             );
 
                             // 3. Try to save to main store for future requests
-                            // TODO: Add TTL to the cache
+                            // Use the specific rate limit config from the custom validator result
+                            let cache_config = custom_result
+                                .rate_limit_config
+                                .as_ref()
+                                .unwrap_or(&config.barnacle_config);
+
+                            // Cache with configurable TTL for keys validated by custom validator
+                            let cache_ttl_seconds = Some(config.cache_ttl_seconds);
                             if let Err(e) = api_key_store
-                                .try_cache_key(&api_key, &config.barnacle_config, None)
+                                .try_cache_key(&api_key, cache_config, cache_ttl_seconds)
                                 .await
                             {
                                 tracing::warn!("Failed to cache API key {}: {}", api_key, e);
