@@ -5,6 +5,7 @@ use std::time::Duration;
 pub enum ResetOnSuccess {
     Not,
     Yes(Option<Vec<u16>>),
+    Multiple(Option<Vec<u16>>, Vec<BarnacleContext>),
 }
 
 /// Rate limiter configuration
@@ -30,7 +31,7 @@ impl BarnacleConfig {
     pub fn is_success_status(&self, status_code: u16) -> bool {
         match &self.reset_on_success {
             ResetOnSuccess::Not => false,
-            ResetOnSuccess::Yes(success_codes) => {
+            ResetOnSuccess::Yes(success_codes) | ResetOnSuccess::Multiple(success_codes, _) => {
                 if let Some(codes) = success_codes {
                     codes.contains(&status_code)
                 } else {
@@ -43,7 +44,7 @@ impl BarnacleConfig {
 }
 
 /// Identification key for rate limiting (e.g., email, api-key, IP)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BarnacleKey {
     Email(String),
     ApiKey(String),
@@ -52,7 +53,7 @@ pub enum BarnacleKey {
 }
 
 /// Rate limiting context that includes route information
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BarnacleContext {
     pub key: BarnacleKey,
     pub path: String,

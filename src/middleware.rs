@@ -411,6 +411,7 @@ async fn handle_rate_limit_reset<S>(
         return;
     }
 
+    
     let key_type = if is_fallback { "fallback key" } else { "key" };
     if !config.is_success_status(status_code) {
         tracing::debug!(
@@ -422,19 +423,27 @@ async fn handle_rate_limit_reset<S>(
         return;
     }
 
-    match store.reset(context).await {
-        Ok(_) => tracing::trace!(
-            "Rate limit reset for {} {:?} after successful request (status: {})",
-            key_type,
-            context.key,
-            status_code
-        ),
-        Err(e) => tracing::error!(
-            "Failed to reset rate limit for {} {:?}: {}",
-            key_type,
-            context.key,
-            e
-        ),
+    let mut contexts = match &config.reset_on_success {
+        ResetOnSuccess::Multiple(_, contexts) => contexts.clone(),
+        _ => vec![context.clone()],
+    };
+
+    for ctx in contexts.iter_mut() {
+        ctx.key = context.key.clone();
+        match store.reset(&ctx).await {
+            Ok(_) => tracing::trace!(
+                "Rate limit reset for {} {:?} after successful request (status: {})",
+                key_type,
+                ctx.key,
+                status_code
+            ),
+            Err(e) => tracing::error!(
+                "Failed to reset rate limit for {} {:?}: {}",
+                key_type,
+                ctx.key,
+                e
+            ),
+        }
     }
 }
 
