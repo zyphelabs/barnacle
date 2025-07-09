@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{request::Parts, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
     Router,
@@ -17,7 +17,7 @@ use tokio::time::sleep;
 
 // Test application setup - mirrors basic.rs example
 impl KeyExtractable for LoginRequest {
-    fn extract_key(&self) -> BarnacleKey {
+    fn extract_key(&self, _request_parts: &Parts) -> BarnacleKey {
         BarnacleKey::Email(self.email.clone())
     }
 }

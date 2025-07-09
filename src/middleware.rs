@@ -1,5 +1,6 @@
 use axum::body::Body;
 use axum::extract::{OriginalUri, Request};
+use axum::http::request::Parts;
 use axum::http::Response;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
@@ -17,7 +18,7 @@ use crate::{
 
 /// Trait to extract the key from any payload type
 pub trait KeyExtractable {
-    fn extract_key(&self) -> BarnacleKey;
+    fn extract_key(&self, request_parts: &Parts) -> BarnacleKey;
 }
 
 /// Generic rate limiting layer that can extract keys from request bodies
@@ -165,7 +166,7 @@ where
                     Ok(collected) => {
                         let bytes = collected.to_bytes();
                         if let Ok(payload) = serde_json::from_slice::<T>(&bytes) {
-                            let key = payload.extract_key();
+                            let key = payload.extract_key(&parts);
                             let context = BarnacleContext {
                                 key,
                                 path: current_path.clone(),
