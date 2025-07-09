@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::extract::Request;
+use axum::extract::{OriginalUri, Request};
 use axum::http::Response;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
@@ -133,16 +133,29 @@ where
         let config = self.config.clone();
 
         Box::pin(async move {
+            let current_path = {
+                let original_path = req
+                    .extensions()
+                    .get::<OriginalUri>()
+                    .map(|original_url| original_url.path().to_owned());
+
+                original_path.unwrap_or_else(|| req.uri().path().to_owned())
+            };
             let (parts, body) = req.into_parts();
 
             // If T is (), we don't need to deserialize the body
             let (rate_limit_context, body_bytes) = if std::any::TypeId::of::<T>()
                 == std::any::TypeId::of::<()>()
             {
-                let fallback_key = get_fallback_key_from_parts(&parts);
+                let fallback_key = get_fallback_key_common(
+                    &parts.extensions,
+                    &parts.headers,
+                    &current_path,
+                    &parts.method,
+                );
                 let context = BarnacleContext {
                     key: fallback_key,
-                    path: parts.uri.path().to_string(),
+                    path: current_path,
                     method: parts.method.as_str().to_string(),
                 };
                 (context, None)
@@ -155,25 +168,35 @@ where
                             let key = payload.extract_key();
                             let context = BarnacleContext {
                                 key,
-                                path: parts.uri.path().to_string(),
+                                path: current_path.clone(),
                                 method: parts.method.as_str().to_string(),
                             };
                             (context, Some(bytes))
                         } else {
-                            let fallback_key = get_fallback_key_from_parts(&parts);
+                            let fallback_key = get_fallback_key_common(
+                                &parts.extensions,
+                                &parts.headers,
+                                &current_path,
+                                &parts.method,
+                            );
                             let context = BarnacleContext {
                                 key: fallback_key,
-                                path: parts.uri.path().to_string(),
+                                path: current_path.clone(),
                                 method: parts.method.as_str().to_string(),
                             };
                             (context, Some(bytes))
                         }
                     }
                     Err(_) => {
-                        let fallback_key = get_fallback_key_from_parts(&parts);
+                        let fallback_key = get_fallback_key_common(
+                            &parts.extensions,
+                            &parts.headers,
+                            &current_path,
+                            &parts.method,
+                        );
                         let context = BarnacleContext {
                             key: fallback_key,
-                            path: parts.uri.path().to_string(),
+                            path: current_path.clone(),
                             method: parts.method.as_str().to_string(),
                         };
 
@@ -295,13 +318,26 @@ where
         let config = self.config.clone();
 
         Box::pin(async move {
+            let current_path = {
+                let original_path = req
+                    .extensions()
+                    .get::<OriginalUri>()
+                    .map(|original_url| original_url.path().to_owned());
+
+                original_path.unwrap_or_else(|| req.uri().path().to_owned())
+            };
             let (parts, body) = req.into_parts();
 
             // For () type, always use fallback key
-            let rate_limit_key = get_fallback_key_from_parts(&parts);
+            let rate_limit_key = get_fallback_key_common(
+                &parts.extensions,
+                &parts.headers,
+                &current_path,
+                &parts.method,
+            );
             let context = BarnacleContext {
                 key: rate_limit_key,
-                path: parts.uri.path().to_string(),
+                path: current_path,
                 method: parts.method.as_str().to_string(),
             };
             let result = match store.increment(&context, &config).await {
@@ -402,14 +438,10 @@ async fn handle_rate_limit_reset<S>(
     }
 }
 
-fn get_fallback_key_from_parts(parts: &axum::http::request::Parts) -> BarnacleKey {
-    get_fallback_key_common(&parts.extensions, &parts.headers, &parts.uri, &parts.method)
-}
-
 fn get_fallback_key_common(
     extensions: &axum::http::Extensions,
     headers: &axum::http::HeaderMap,
-    uri: &axum::http::Uri,
+    path: &str,
     method: &axum::http::Method,
 ) -> BarnacleKey {
     // 1. Try ConnectInfo<SocketAddr> (only available in full Request)
@@ -438,7 +470,6 @@ fn get_fallback_key_common(
     }
 
     // 4. For local requests, use a unique identifier based on route + method
-    let path = uri.path();
     let method_str = method.as_str();
     let local_key = format!("local:{}:{}", method_str, path);
     BarnacleKey::Ip(local_key)

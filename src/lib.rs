@@ -82,6 +82,11 @@ pub use deadpool_redis;
 
 use async_trait::async_trait;
 
+pub const BARNACLE_EMAIL_KEY_PREFIX: &str = "barnacle:email";
+pub const BARNACLE_API_KEY_PREFIX: &str = "barnacle:api_keys";
+pub const BARNACLE_IP_PREFIX: &str = "barnacle:ip";
+pub const BARNACLE_CUSTOM_PREFIX: &str = "barnacle:custom";
+
 /// Trait to abstract the rate limiter storage backend (e.g., Redis)
 #[async_trait]
 pub trait BarnacleStore: Send + Sync {

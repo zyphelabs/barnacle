@@ -1,5 +1,5 @@
 use axum::body::Body;
-use axum::extract::Request;
+use axum::extract::{OriginalUri, Request};
 use axum::http::{HeaderMap, Response};
 use axum::response::IntoResponse;
 use std::sync::Arc;
@@ -165,6 +165,15 @@ where
         let config = self.config.clone();
 
         Box::pin(async move {
+            let current_path = {
+                let original_path = req
+                    .extensions()
+                    .get::<OriginalUri>()
+                    .map(|original_url| original_url.path().to_owned());
+
+                original_path.unwrap_or_else(|| req.uri().path().to_owned())
+            };
+
             let headers = req.headers();
 
             let api_key = extract_api_key(headers, &config.header_name);
@@ -196,7 +205,7 @@ where
                 // Create context with route information
                 let context = BarnacleContext {
                     key: rate_limit_key,
-                    path: req.uri().path().to_string(),
+                    path: current_path,
                     method: req.method().as_str().to_string(),
                 };
 
@@ -213,8 +222,9 @@ where
                 };
 
                 tracing::debug!(
-                    "API key validation and rate limit check passed for: {}, remaining: {}",
+                    "API key validation and rate limit check passed for: {}, path: {}, remaining: {}",
                     api_key,
+                    context.path,
                     rate_limit_result.remaining
                 );
 
@@ -286,6 +296,14 @@ where
         let config = self.config.clone();
 
         Box::pin(async move {
+            let current_path = {
+                let original_path = req
+                    .extensions()
+                    .get::<OriginalUri>()
+                    .map(|original_url| original_url.path().to_owned());
+
+                original_path.unwrap_or_else(|| req.uri().path().to_owned())
+            };
             let headers = req.headers();
 
             let api_key = extract_api_key(headers, &config.header_name);
@@ -354,7 +372,7 @@ where
                 // Create context with route information
                 let context = BarnacleContext {
                     key: rate_limit_key,
-                    path: req.uri().path().to_string(),
+                    path: current_path,
                     method: req.method().as_str().to_string(),
                 };
 
@@ -371,8 +389,9 @@ where
                 };
 
                 tracing::debug!(
-                    "API key validation and rate limit check passed for: {}, remaining: {}",
+                    "API key validation and rate limit check passed for: {}, path: {}, remaining: {}",
                     api_key,
+                    context.path,
                     rate_limit_result.remaining
                 );
 
