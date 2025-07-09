@@ -13,7 +13,8 @@ use deadpool_redis::{Connection, Pool};
 use crate::{
     error::BarnacleError,
     types::{BarnacleConfig, BarnacleContext, BarnacleKey, BarnacleResult},
-    BarnacleStore,
+    BarnacleStore, BARNACLE_API_KEY_PREFIX, BARNACLE_CUSTOM_PREFIX, BARNACLE_EMAIL_KEY_PREFIX,
+    BARNACLE_IP_PREFIX,
 };
 
 #[cfg(feature = "redis")]
@@ -33,10 +34,10 @@ impl RedisBarnacleStoreInner {
 
     fn get_redis_key(&self, context: &BarnacleContext) -> String {
         let base_key = match &context.key {
-            BarnacleKey::Email(email) => format!("barnacle:email:{}", email),
-            BarnacleKey::ApiKey(api_key) => format!("barnacle:api_keys:{}", api_key),
-            BarnacleKey::Ip(ip) => format!("barnacle:ip:{}", ip),
-            BarnacleKey::Custom(custom_data) => format!("barnacle:custom:{}", custom_data),
+            BarnacleKey::Email(email) => format!("{BARNACLE_EMAIL_KEY_PREFIX}:{}", email),
+            BarnacleKey::ApiKey(api_key) => format!("{BARNACLE_API_KEY_PREFIX}:{}", api_key),
+            BarnacleKey::Ip(ip) => format!("{BARNACLE_IP_PREFIX}:{}", ip),
+            BarnacleKey::Custom(custom_data) => format!("{BARNACLE_CUSTOM_PREFIX}:{}", custom_data),
         };
 
         // Include path and method in the Redis key
