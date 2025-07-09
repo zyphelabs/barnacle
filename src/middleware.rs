@@ -337,7 +337,7 @@ where
             );
             let context = BarnacleContext {
                 key: rate_limit_key,
-                path: parts.uri.to_string(),
+                path: current_path,
                 method: parts.method.as_str().to_string(),
             };
             let result = match store.increment(&context, &config).await {
