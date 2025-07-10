@@ -423,10 +423,11 @@ async fn handle_rate_limit_reset<S>(
         return;
     }
 
-    let mut contexts = match &config.reset_on_success {
-        ResetOnSuccess::Multiple(_, contexts) => contexts.clone(),
-        _ => vec![context.clone()],
-    };
+    let mut contexts = vec![context.clone()];
+
+    if let ResetOnSuccess::Multiple(_, extra_contexts) = &config.reset_on_success {
+        contexts.extend(extra_contexts.iter().cloned());
+    }
 
     for ctx in contexts.iter_mut() {
         if ctx.key == BarnacleKey::Custom("".to_string()) {
