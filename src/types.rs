@@ -60,6 +60,19 @@ pub struct BarnacleContext {
     pub method: String,
 }
 
+impl BarnacleContext {
+    /// This will be used to reset the rate limit for a specific path and method
+    ///
+    /// The key will be replaced with the current request's key
+    pub fn with_path_and_method(path: impl Into<String>, method: impl Into<String>) -> Self {
+        Self {
+            key: BarnacleKey::Custom("".to_string()),
+            path: path.into(),
+            method: method.into(),
+        }
+    }
+}
+
 /// Result of an increment attempt
 #[derive(Clone, Debug)]
 pub struct BarnacleResult {

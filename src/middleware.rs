@@ -412,7 +412,6 @@ async fn handle_rate_limit_reset<S>(
         return;
     }
 
-    
     let key_type = if is_fallback { "fallback key" } else { "key" };
     if !config.is_success_status(status_code) {
         tracing::debug!(
@@ -430,19 +429,23 @@ async fn handle_rate_limit_reset<S>(
     };
 
     for ctx in contexts.iter_mut() {
-        ctx.key = context.key.clone();
-        match store.reset(&ctx).await {
+        if ctx.key == BarnacleKey::Custom("".to_string()) {
+            ctx.key = context.key.clone();
+        }
+        match store.reset(ctx).await {
             Ok(_) => tracing::trace!(
-                "Rate limit reset for {} {:?} after successful request (status: {})",
+                "Rate limit reset for {} {:?} after successful request (status: {}) path: {}",
                 key_type,
                 ctx.key,
-                status_code
+                status_code,
+                ctx.path
             ),
             Err(e) => tracing::error!(
-                "Failed to reset rate limit for {} {:?}: {}",
+                "Failed to reset rate limit for {} {:?}: {} path: {}",
                 key_type,
                 ctx.key,
-                e
+                e,
+                ctx.path
             ),
         }
     }
