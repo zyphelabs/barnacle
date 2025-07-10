@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Special constant to indicate a placeholder key that should be replaced
+pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ResetOnSuccess {
     Not,
@@ -66,7 +69,7 @@ impl BarnacleContext {
     /// The key will be replaced with the current request's key
     pub fn with_path_and_method(path: impl Into<String>, method: impl Into<String>) -> Self {
         Self {
-            key: BarnacleKey::Custom("".to_string()),
+            key: BarnacleKey::Custom(NO_KEY.to_string()),
             path: path.into(),
             method: method.into(),
         }

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
-use crate::types::ResetOnSuccess;
+use crate::types::{ResetOnSuccess, NO_KEY};
 use crate::{
     types::{BarnacleConfig, BarnacleContext, BarnacleKey},
     BarnacleStore,
@@ -430,7 +430,7 @@ async fn handle_rate_limit_reset<S>(
     }
 
     for ctx in contexts.iter_mut() {
-        if ctx.key == BarnacleKey::Custom("".to_string()) {
+        if ctx.key == BarnacleKey::Custom(NO_KEY.to_string()) {
             ctx.key = context.key.clone();
         }
         match store.reset(ctx).await {
