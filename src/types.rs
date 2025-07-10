@@ -1,10 +1,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Special constant to indicate a placeholder key that should be replaced
+pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ResetOnSuccess {
     Not,
     Yes(Option<Vec<u16>>),
+    Multiple(Option<Vec<u16>>, Vec<BarnacleContext>),
 }
 
 /// Rate limiter configuration
@@ -30,7 +34,7 @@ impl BarnacleConfig {
     pub fn is_success_status(&self, status_code: u16) -> bool {
         match &self.reset_on_success {
             ResetOnSuccess::Not => false,
-            ResetOnSuccess::Yes(success_codes) => {
+            ResetOnSuccess::Yes(success_codes) | ResetOnSuccess::Multiple(success_codes, _) => {
                 if let Some(codes) = success_codes {
                     codes.contains(&status_code)
                 } else {
@@ -43,7 +47,7 @@ impl BarnacleConfig {
 }
 
 /// Identification key for rate limiting (e.g., email, api-key, IP)
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BarnacleKey {
     Email(String),
     ApiKey(String),
@@ -52,11 +56,24 @@ pub enum BarnacleKey {
 }
 
 /// Rate limiting context that includes route information
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BarnacleContext {
     pub key: BarnacleKey,
     pub path: String,
     pub method: String,
+}
+
+impl BarnacleContext {
+    /// This will be used to reset the rate limit for a specific path and method
+    ///
+    /// The key will be replaced with the current request's key
+    pub fn with_path_and_method(path: impl Into<String>, method: impl Into<String>) -> Self {
+        Self {
+            key: BarnacleKey::Custom(NO_KEY.to_string()),
+            path: path.into(),
+            method: method.into(),
+        }
+    }
 }
 
 /// Result of an increment attempt

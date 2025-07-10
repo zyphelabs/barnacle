@@ -1,5 +1,6 @@
 use axum::body::Body;
 use axum::extract::{OriginalUri, Request};
+use axum::http::request::Parts;
 use axum::http::Response;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
@@ -9,7 +10,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tower::{Layer, Service};
 
-use crate::types::ResetOnSuccess;
+use crate::types::{ResetOnSuccess, NO_KEY};
 use crate::{
     types::{BarnacleConfig, BarnacleContext, BarnacleKey},
     BarnacleStore,
@@ -17,7 +18,7 @@ use crate::{
 
 /// Trait to extract the key from any payload type
 pub trait KeyExtractable {
-    fn extract_key(&self) -> BarnacleKey;
+    fn extract_key(&self, request_parts: &Parts) -> BarnacleKey;
 }
 
 /// Generic rate limiting layer that can extract keys from request bodies
@@ -165,7 +166,7 @@ where
                     Ok(collected) => {
                         let bytes = collected.to_bytes();
                         if let Ok(payload) = serde_json::from_slice::<T>(&bytes) {
-                            let key = payload.extract_key();
+                            let key = payload.extract_key(&parts);
                             let context = BarnacleContext {
                                 key,
                                 path: current_path.clone(),
@@ -422,19 +423,32 @@ async fn handle_rate_limit_reset<S>(
         return;
     }
 
-    match store.reset(context).await {
-        Ok(_) => tracing::trace!(
-            "Rate limit reset for {} {:?} after successful request (status: {})",
-            key_type,
-            context.key,
-            status_code
-        ),
-        Err(e) => tracing::error!(
-            "Failed to reset rate limit for {} {:?}: {}",
-            key_type,
-            context.key,
-            e
-        ),
+    let mut contexts = vec![context.clone()];
+
+    if let ResetOnSuccess::Multiple(_, extra_contexts) = &config.reset_on_success {
+        contexts.extend(extra_contexts.iter().cloned());
+    }
+
+    for ctx in contexts.iter_mut() {
+        if ctx.key == BarnacleKey::Custom(NO_KEY.to_string()) {
+            ctx.key = context.key.clone();
+        }
+        match store.reset(ctx).await {
+            Ok(_) => tracing::trace!(
+                "Rate limit reset for {} {:?} after successful request (status: {}) path: {}",
+                key_type,
+                ctx.key,
+                status_code,
+                ctx.path
+            ),
+            Err(e) => tracing::error!(
+                "Failed to reset rate limit for {} {:?}: {} path: {}",
+                key_type,
+                ctx.key,
+                e,
+                ctx.path
+            ),
+        }
     }
 }
 

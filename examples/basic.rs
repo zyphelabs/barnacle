@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{request::Parts, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
     Router,
@@ -14,7 +14,7 @@ use barnacle_rs::{
 use serde::{Deserialize, Serialize};
 
 impl KeyExtractable for LoginRequest {
-    fn extract_key(&self) -> BarnacleKey {
+    fn extract_key(&self, _request_parts: &Parts) -> BarnacleKey {
         BarnacleKey::Email(self.email.clone())
     }
 }
