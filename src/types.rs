@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use reqwest::header::ORIGIN;
+use axum::http::header::ORIGIN;
 
 /// Special constant to indicate a placeholder key that should be replaced
 pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
@@ -202,25 +202,25 @@ pub struct BarnacleResult {
 
 /// API key validation result
 #[derive(Clone, Debug)]
-pub struct ApiKeyValidationResult {
+pub struct ApiKeyValidationResult<T> {
     pub valid: bool,
-    pub key_id: Option<String>,
+    pub key: Option<T>,
     pub rate_limit_config: Option<BarnacleConfig>,
 }
 
-impl ApiKeyValidationResult {
-    pub fn valid_with_config(key_id: String, config: BarnacleConfig) -> Self {
+impl<T> ApiKeyValidationResult<T> {
+    pub fn valid_with_config(key: T, config: BarnacleConfig) -> Self {
         Self {
             valid: true,
-            key_id: Some(key_id),
+            key: Some(key),
             rate_limit_config: Some(config),
         }
     }
 
-    pub fn valid_with_default_config(key_id: String) -> Self {
+    pub fn valid_with_default_config(key: T) -> Self {
         Self {
             valid: true,
-            key_id: Some(key_id),
+            key: Some(key),
             rate_limit_config: Some(BarnacleConfig::default()),
         }
     }
@@ -228,9 +228,15 @@ impl ApiKeyValidationResult {
     pub fn invalid() -> Self {
         Self {
             valid: false,
-            key_id: None,
+            key: None,
             rate_limit_config: None,
         }
+    }
+}
+
+impl ApiKeyValidationResult<String> {
+    pub fn valid_string_key(key: String, config: BarnacleConfig) -> Self {
+        Self::valid_with_config(key, config)
     }
 }
 
