@@ -63,8 +63,8 @@ pub use middleware::{
 };
 pub use tracing;
 pub use types::{
-    ApiKeyMiddlewareConfig, ApiKeyValidationResult, BarnacleConfig, BarnacleContext, BarnacleKey,
-    ResetOnSuccess, StaticApiKeyConfig,
+    ApiKeyExtractionResult, ApiKeyMiddlewareConfig, ApiKeyValidationResult, BarnacleConfig,
+    BarnacleContext, BarnacleKey, ResetOnSuccess, StaticApiKeyConfig,
 };
 
 // Re-export the legacy BarnacleResult type from types.rs for backward compatibility

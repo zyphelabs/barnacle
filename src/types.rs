@@ -1,8 +1,124 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use reqwest::header::ORIGIN;
+
 /// Special constant to indicate a placeholder key that should be replaced
 pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
+
+/// Result of API key extraction from a request
+#[derive(Clone, Debug)]
+pub struct ApiKeyExtractionResult {
+    pub api_key: String,
+    pub is_sandbox: bool,
+    pub matched_path: String,
+    pub original_path: String,
+    pub ids_from_path: Vec<String>,
+    pub origin: String,
+    pub barnacle_context: BarnacleContext,
+}
+
+impl ApiKeyExtractionResult {
+    pub fn new(
+        api_key: String,
+        is_sandbox: bool,
+        matched_path: String,
+        original_path: String,
+        ids_from_path: Vec<String>,
+        origin: String,
+        barnacle_context: BarnacleContext,
+    ) -> Self {
+        Self {
+            api_key,
+            is_sandbox,
+            matched_path,
+            original_path,
+            ids_from_path,
+            origin,
+            barnacle_context,
+        }
+    }
+
+    /// Extract API key and sandbox information from an HTTP request
+    pub fn extract_api_key_values<B>(
+        request: &axum::extract::Request<B>,
+        ids_indexes: Vec<usize>,
+    ) -> Result<ApiKeyExtractionResult, crate::error::BarnacleError> {
+        // Extract API key from header - return error if missing
+        let api_key = request
+            .headers()
+            .get("x-api-key")
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_string())
+            .ok_or(crate::error::BarnacleError::ApiKeyMissing)?;
+
+        // Check if sandbox mode is enabled by looking at query parameters
+        let is_sandbox = request
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .contains("sandbox=true");
+
+        // Extract matched path from request extensions, fallback to URI path
+        let matched_path = request
+            .extensions()
+            .get::<axum::extract::MatchedPath>()
+            .map(|p| p.as_str())
+            .unwrap_or(request.uri().path())
+            .to_string();
+
+        // Extract original path from request extensions, fallback to URI path
+        let original_path = request
+            .extensions()
+            .get::<axum::extract::OriginalUri>()
+            .map(|original_uri| original_uri.path())
+            .unwrap_or(request.uri().path())
+            .to_string();
+
+        let ids_from_path = Self::extract_ids_from_path(&original_path, ids_indexes);
+
+        // Extract origin from ORIGIN header
+        let origin = request
+            .headers()
+            .get(ORIGIN)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        // Create BarnacleContext with the API key
+        let barnacle_context = BarnacleContext {
+            key: BarnacleKey::ApiKey(api_key.clone()),
+            path: request.uri().path().to_string(),
+            method: request.method().to_string(),
+        };
+
+        Ok(ApiKeyExtractionResult::new(
+            api_key,
+            is_sandbox,
+            matched_path,
+            original_path,
+            ids_from_path,
+            origin,
+            barnacle_context,
+        ))
+    }
+
+    fn extract_ids_from_path(path: &str, ids_indexes: Vec<usize>) -> Vec<String> {
+        ids_indexes
+            .iter()
+            .map(|index| Self::extract_path_segment(path, *index).unwrap_or_default())
+            .collect()
+    }
+
+    /// Extract a specific segment from a path by index (0-based)
+    /// Example: extract_path_segment("/api/organizations/123/users", 2) returns Some("123")
+    fn extract_path_segment(path: &str, segment_index: usize) -> Option<String> {
+        path.split('/')
+            .nth(segment_index)
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| segment.to_string())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ResetOnSuccess {
