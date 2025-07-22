@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/crates/l/barnacle-rs)](https://github.com/zyphelabs/barnacle-rs/blob/main/LICENSE)
 [![Rust Version](https://img.shields.io/badge/rust-1.70+-blue.svg)](https://www.rust-lang.org)
 
-Rate limiting middleware for Axum with Redis backend and API key validation.
+Rate limiting and API key validation middleware for Axum with Redis backend.
 
 [Repository](https://github.com/zyphelabs/barnacle-rs) | [Documentation](https://docs.rs/barnacle-rs) | [Crates.io](https://crates.io/crates/barnacle-rs)
 
@@ -34,25 +34,24 @@ tokio = { version = "1", features = ["full"] }
 ### Basic Rate Limiting
 
 ```rust
-use barnacle_rs::{create_barnacle_layer, RedisBarnacleStore, BarnacleConfig};
+use barnacle_rs::{RedisBarnacleStore, BarnacleConfig};
 use axum::{Router, routing::get};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379").await?;
-    
     let config = BarnacleConfig {
         max_requests: 10,
         window: std::time::Duration::from_secs(60),
         reset_on_success: barnacle_rs::ResetOnSuccess::Not,
     };
-
-    let rate_limiter = create_barnacle_layer(store, config);
-
+    let layer = barnacle_rs::BarnacleLayer::builder()
+        .with_store(store)
+        .with_config(config)
+        .build();
     let app = Router::new()
         .route("/api/data", get(handler))
-        .layer(rate_limiter);
-
+        .layer(layer);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -63,33 +62,113 @@ async fn handler() -> &'static str {
 }
 ```
 
-### API Key Validation
+### API Key Validation (Stateless)
 
 ```rust
-use barnacle_rs::{create_api_key_layer, RedisApiKeyStore, RedisBarnacleStore};
+use barnacle_rs::{BarnacleLayer, BarnacleConfig, RedisBarnacleStore, BarnacleError};
+use axum::{Router, routing::get};
+use std::sync::Arc;
+use axum::http::request::Parts;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let redis_pool = deadpool_redis::Config::from_url("redis://localhost")
-        .create_pool(Some(deadpool_redis::Runtime::Tokio1))?;
-
-    let api_key_store = RedisApiKeyStore::new(redis_pool.clone(), BarnacleConfig::default());
-    let rate_limit_store = RedisBarnacleStore::new(redis_pool);
-
-    let middleware = create_api_key_layer(api_key_store, rate_limit_store);
-
+    let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379").await?;
+    let config = BarnacleConfig::default();
+    let api_key_validator = |api_key: String, _api_key_config: BarnacleConfig, _parts: Arc<Parts>, _state: ()| async move {
+        if api_key.is_empty() {
+            Err(BarnacleError::ApiKeyMissing)
+        } else if api_key != "test-key" {
+            Err(BarnacleError::invalid_api_key(api_key))
+        } else {
+            Ok(())
+        }
+    };
+    let layer: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, _> = BarnacleLayer::builder()
+        .with_store(store)
+        .with_config(config)
+        .with_api_key_validator(api_key_validator)
+        .with_state(())
+        .build()
+        .unwrap();
     let app = Router::new()
-        .route("/api/protected", get(protected_handler))
-        .layer(middleware);
-
+        .route("/api/protected", get(handler))
+        .layer(layer);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 
-async fn protected_handler() -> &'static str {
+async fn handler() -> &'static str {
     "Protected endpoint"
 }
+```
+
+### API Key Validation (With State)
+
+```rust
+use barnacle_rs::{BarnacleLayer, BarnacleConfig, RedisBarnacleStore, BarnacleError};
+use axum::{Router, routing::get};
+use std::sync::Arc;
+use axum::http::request::Parts;
+
+#[derive(Clone)]
+struct MyState {
+    allowed_keys: Vec<String>,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379").await?;
+    let config = BarnacleConfig::default();
+    let state = MyState { allowed_keys: vec!["my-secret-key".to_string()] };
+    let api_key_validator = |api_key: String, _api_key_config: BarnacleConfig, _parts: Arc<Parts>, state: MyState| async move {
+        let allowed = state.allowed_keys.contains(&api_key);
+        if allowed {
+            Ok(())
+        } else {
+            Err(BarnacleError::invalid_api_key(api_key))
+        }
+    };
+    let layer: BarnacleLayer<(), RedisBarnacleStore, MyState, BarnacleError, _> = BarnacleLayer::builder()
+        .with_store(store)
+        .with_config(config)
+        .with_state(state)
+        .with_api_key_validator(api_key_validator)
+        .build()
+        .unwrap();
+    let app = Router::new()
+        .route("/api/protected", get(handler))
+        .layer(layer);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn handler() -> &'static str {
+    "Protected endpoint with state"
+}
+```
+
+### Custom Key Extraction (e.g., Email)
+
+```rust
+use barnacle_rs::{KeyExtractable, BarnacleKey};
+use axum::http::request::Parts;
+
+#[derive(serde::Deserialize)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+impl KeyExtractable for LoginRequest {
+    fn extract_key(&self, _request_parts: &Parts) -> BarnacleKey {
+        BarnacleKey::Email(self.email.clone())
+    }
+}
+let layer = barnacle_rs::BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .build();
 ```
 
 ## Configuration
@@ -109,13 +188,19 @@ let config = BarnacleConfig {
 ### IP-based (default)
 
 ```rust
-let limiter = create_barnacle_layer(store, config);
+let layer = barnacle_rs::BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .build();
 ```
 
 ### API Key-based
 
 ```rust
-let limiter = create_api_key_layer(api_key_store, rate_limit_store);
+let layer = barnacle_rs::BarnacleLayer::builder()
+    .with_store(api_key_store)
+    .with_config(rate_limit_store)
+    .build();
 ```
 
 ### Custom Key (e.g., email)
@@ -136,7 +221,10 @@ impl KeyExtractable for LoginRequest {
 
 }
 
-let limiter = create_barnacle_layer_for_payload::<LoginRequest>(store, config);
+let layer = barnacle_rs::BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .build();
 ```
 
 ## Automatic Route-Based Rate Limiting
@@ -196,3 +284,44 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Example: No Validator (API key validation disabled)
+
+```rust
+use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, BarnacleError};
+
+let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, ()> = BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .build()
+    .unwrap();
+```
+
+## Example: With Validator (API key validation enabled)
+
+```rust
+use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, BarnacleError};
+use std::sync::Arc;
+use axum::http::request::Parts;
+
+let api_key_validator = |api_key: String, api_key_config: ApiKeyConfig, parts: Arc<Parts>, state: ()| async move {
+    if api_key == "test-key" {
+        Ok(())
+    } else {
+        Err(BarnacleError::invalid_api_key(api_key))
+    }
+};
+
+let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, _> = BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .with_api_key_validator(api_key_validator)
+    .with_state(())
+    .build()
+    .unwrap();
+```
+
+**Note:**
+- The validator closure must take owned arguments: `(String, ApiKeyConfig, Arc<Parts>, State)`.
+- If you do not provide a validator, use `()` for the last type parameter.
+- If you provide a validator, use `_` for the last type parameter to let Rust infer the closure type.

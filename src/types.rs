@@ -120,44 +120,32 @@ impl ApiKeyValidationResult {
 
 /// Configuration for API key middleware
 #[derive(Clone, Debug)]
-pub struct ApiKeyMiddlewareConfig {
+pub struct ApiKeyConfig {
     pub header_name: String,
-    pub barnacle_config: BarnacleConfig,
-    pub require_api_key: bool,
     /// TTL for caching API keys validated by custom validator (in seconds)
     pub cache_ttl_seconds: u64,
 }
 
-impl ApiKeyMiddlewareConfig {
-    pub fn new(barnacle_config: BarnacleConfig) -> Self {
-        Self {
-            header_name: "x-api-key".to_string(),
-            barnacle_config,
-            require_api_key: true,
-            cache_ttl_seconds: 60 * 60, // 1 hour default
-        }
+impl ApiKeyConfig {
+    pub fn new() -> Self {
+        Default::default()
     }
 
     pub fn custom(
         header_name: String,
-        barnacle_config: BarnacleConfig,
         cache_ttl_seconds: u64,
     ) -> Self {
         Self {
             header_name,
-            barnacle_config,
-            require_api_key: true,
             cache_ttl_seconds, // 1 hour default
         }
     }
 }
 
-impl Default for ApiKeyMiddlewareConfig {
+impl Default for ApiKeyConfig {
     fn default() -> Self {
         Self {
             header_name: "x-api-key".to_string(),
-            barnacle_config: BarnacleConfig::default(),
-            require_api_key: true,
             cache_ttl_seconds: 60 * 60, // 1 hour default
         }
     }

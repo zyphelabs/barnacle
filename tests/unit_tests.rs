@@ -121,3 +121,61 @@ mod basic_unit_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod barnacle_layer_unit_tests {
+    use axum::{body::Body, http::{request::Parts, Request}};
+    use barnacle_rs::{ApiKeyConfig, BarnacleError};
+    use reqwest::Method;
+    use std::sync::Arc;
+
+
+    #[test]
+    fn test_stateless_api_key_validator_success() {
+        #[derive(Clone)]
+        struct State { allowed: String }
+        let state = State { allowed: "test-key".to_string() };
+        let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, state: State| async move {
+            let key = api_key.to_string();
+            let allowed = state.allowed == key;
+            if allowed {
+                Ok(())
+            } else {
+                Err(BarnacleError::invalid_api_key(api_key))
+            }
+        };
+        let req = Request::builder().uri("/test").method(Method::GET).body(Body::empty()).unwrap();
+        let (parts, _) = req.into_parts();
+        let parts = Arc::new(parts);
+        // Just check that the validator works as expected
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(api_key_validator("test-key".to_string(), ApiKeyConfig::default(), parts.clone(), state.clone()));
+        assert!(result.is_ok());
+        let result = rt.block_on(api_key_validator("invalid".to_string(), ApiKeyConfig::default(), parts, state));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stateful_api_key_validator_success() {
+        #[derive(Clone)]
+        struct State { allowed: String }
+        let state = State { allowed: "foo".to_string() };
+        let validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, state: State| async move {
+            let key = api_key.to_string();
+            let allowed = state.allowed == key;
+            if allowed {
+                Ok(())
+            } else {
+                Err(BarnacleError::invalid_api_key(key))
+            }
+        };
+        let req = Request::builder().uri("/test").method(Method::GET).body(Body::empty()).unwrap();
+        let (parts, _) = req.into_parts();
+        let parts = Arc::new(parts);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(validator("foo".to_string(), ApiKeyConfig::default(), parts.clone(), state.clone()));
+        assert!(result.is_ok());
+        let result = rt.block_on(validator("bar".to_string(), ApiKeyConfig::default(), parts, state));
+        assert!(result.is_err());
+    }
+}

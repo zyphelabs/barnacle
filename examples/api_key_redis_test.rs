@@ -1,101 +1,43 @@
-use axum::{routing::get, Json, Router};
-use barnacle_rs::RedisBarnacleStore;
-use barnacle_rs::{create_api_key_layer, BarnacleConfig, RedisApiKeyStore};
-use deadpool_redis::Config as RedisConfig;
+use axum::{http::request::Parts, routing::get, Json, Router};
+use barnacle_rs::{ApiKeyConfig, BarnacleConfig, BarnacleError, BarnacleLayer, RedisBarnacleStore};
 use serde_json::json;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 #[tokio::main]
 async fn main() {
     // Redis pool setup
-    let redis_cfg = RedisConfig::from_url("redis://127.0.0.1/");
+    let redis_cfg = deadpool_redis::Config::from_url("redis://127.0.0.1/");
     let pool = redis_cfg.create_pool(None).unwrap();
-
-    // Multiple API keys with different rate limit configurations
-    let api_keys = vec![
-        (
-            "valid-key-123",
-            BarnacleConfig {
-                max_requests: 3,
-                window: std::time::Duration::from_secs(6), // 6 seconds for faster testing
-                ..Default::default()
-            },
-        ),
-        (
-            "premium-key-456",
-            BarnacleConfig {
-                max_requests: 10,
-                window: std::time::Duration::from_secs(6), // 6 seconds for faster testing
-                ..Default::default()
-            },
-        ),
-        (
-            "basic-key-789",
-            BarnacleConfig {
-                max_requests: 1,
-                window: std::time::Duration::from_secs(6), // 6 seconds for faster testing
-                ..Default::default()
-            },
-        ),
-    ];
-
-    // Insert all API keys and their configs into Redis for testing
-    {
-        let mut conn = pool.get().await.expect("Failed to get Redis connection");
-
-        for (api_key, rate_limit) in &api_keys {
-            let key = format!("barnacle:api_keys:{}", api_key);
-            let config_key = format!("barnacle:api_keys:config:{}", api_key);
-
-            // Set API key as valid
-            let _: () = deadpool_redis::redis::cmd("SET")
-                .arg(&key)
-                .arg(1)
-                .query_async(&mut conn)
-                .await
-                .unwrap_or_else(|_| panic!("Failed to set API key: {}", api_key));
-
-            // Set rate limit configuration
-            let config_json = serde_json::to_string(&rate_limit).unwrap();
-            let _: () = deadpool_redis::redis::cmd("SET")
-                .arg(&config_key)
-                .arg(&config_json)
-                .query_async(&mut conn)
-                .await
-                .unwrap_or_else(|_| panic!("Failed to set config for API key: {}", api_key));
+    let store = RedisBarnacleStore::new(pool.clone());
+    let config = BarnacleConfig {
+        max_requests: 3,
+        window: std::time::Duration::from_secs(6),
+        ..Default::default()
+    };
+    let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
+        if api_key != "redis-key" {
+            Err(BarnacleError::invalid_api_key(api_key))
+        } else {
+            Ok(())
         }
-
-        println!("✅ Configured {} API keys in Redis:", api_keys.len());
-        for (api_key, config) in &api_keys {
-            println!(
-                "   - {}: {} requests per {} seconds",
-                api_key,
-                config.max_requests,
-                config.window.as_secs()
-            );
-        }
-    }
-
-    let api_key_store = RedisApiKeyStore::new(pool.clone());
-    let rate_limit_store = RedisBarnacleStore::new(pool);
-    let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
+    };
+    let middleware: BarnacleLayer<(), _, _, BarnacleError, _> = BarnacleLayer::builder()
+        .with_store(store)
+        .with_config(config)
+        .with_api_key_validator(api_key_validator)
+        .with_state(())
+        .build()
+        .unwrap();
 
     // Test endpoint
     let app = Router::new()
         .route("/test", get(test_handler))
-        .layer(api_key_layer);
+        .layer(middleware);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     println!("🚀 Test server running at http://{}", addr);
     println!("📋 Available API keys for testing:");
-    for (api_key, config) in &api_keys {
-        println!(
-            "   - {} ({} req/{}s)",
-            api_key,
-            config.max_requests,
-            config.window.as_secs()
-        );
-    }
+    println!("   - valid-key-123 (3 req/6s)");
     println!("   - invalid-key-xyz (invalid)");
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();

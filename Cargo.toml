@@ -1,6 +1,6 @@
 [package]
 name = "barnacle-rs"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 description = "Advanced rate limiting middleware for Axum with Redis backend, API key validation, and custom key extraction"
 readme = "README.md"
@@ -18,7 +18,7 @@ redis = ["dep:redis", "dep:deadpool-redis"]
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 redis = { version = "0.32.2", features = ["tokio-comp"], optional = true }
 deadpool-redis = { version = "0.21.1", features = [
     "rt_tokio_1",
@@ -35,6 +35,8 @@ http-body-util = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.17.0", features = ["v4"] }
+futures = "0.3.31"
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }

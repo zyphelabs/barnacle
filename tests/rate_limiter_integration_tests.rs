@@ -7,13 +7,11 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use barnacle_rs::{
-    create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleConfig, BarnacleContext,
-    BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
-};
+use barnacle_rs::{BarnacleConfig, BarnacleContext, BarnacleKey, BarnacleLayer, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::sleep;
+use barnacle_rs::BarnacleError;
 
 // Test application setup - mirrors basic.rs example
 impl KeyExtractable for LoginRequest {
@@ -27,14 +25,14 @@ struct AppState {
     store: RedisBarnacleStore,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ApiResponse {
     message: String,
     remaining_requests: Option<u32>,
     rate_limit_info: Option<RateLimitInfo>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct RateLimitInfo {
     remaining: u32,
     limit: u32,
@@ -75,18 +73,17 @@ async fn create_test_app() -> (Router, RedisBarnacleStore) {
         reset_on_success: ResetOnSuccess::Not,
     };
 
-    let login_limiter =
-        create_barnacle_layer_for_payload::<LoginRequest>(store.clone(), login_config);
-    let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
-    let moderate_limiter = create_barnacle_layer(store.clone(), moderate_config);
+    let login_layer: BarnacleLayer<LoginRequest, RedisBarnacleStore, (), BarnacleError, ()> = BarnacleLayer::builder().with_store(store.clone()).with_config(login_config).build().unwrap();
+    let strict_layer: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, ()> = BarnacleLayer::builder().with_store(store.clone()).with_config(strict_config).build().unwrap();
+    let moderate_layer: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, ()> = BarnacleLayer::builder().with_store(store.clone()).with_config(moderate_config).build().unwrap();
 
     let app = Router::new()
-        .route("/api/strict", get(strict_endpoint).layer(strict_limiter))
+        .route("/api/strict", get(strict_endpoint).layer(strict_layer))
         .route(
             "/api/moderate",
-            get(moderate_endpoint).layer(moderate_limiter),
+            get(moderate_endpoint).layer(moderate_layer),
         )
-        .route("/api/login", post(login_endpoint).layer(login_limiter))
+        .route("/api/login", post(login_endpoint).layer(login_layer))
         .route("/api/reset/{:key_type}/{:value}", post(reset_rate_limit))
         .route("/api/status", get(status_endpoint))
         .with_state(state);
@@ -230,8 +227,6 @@ mod rate_limit {
                 .await
                 .unwrap_or_else(|_| panic!("Request {} failed", i));
 
-            println!("Request {} status: {:?}", i, response.status());
-
             responses.push(response.status());
             sleep(Duration::from_millis(100)).await;
         }
@@ -272,8 +267,6 @@ mod rate_limit {
                 .await
                 .unwrap_or_else(|_| panic!("Request {} failed", i));
 
-            println!("Moderate Request {} status: {:?}", i, response.status());
-
             responses.push(response.status());
             sleep(Duration::from_millis(100)).await;
         }
@@ -302,8 +295,6 @@ mod rate_limit {
             .await
             .expect("Reset request failed");
 
-        println!("Reset response status: {:?}", reset_response.status());
-
         // Reset should succeed (200)
         assert_eq!(
             reset_response.status(),
@@ -323,8 +314,6 @@ mod rate_limit {
                 .send()
                 .await
                 .unwrap_or_else(|_| panic!("Login request {} failed", i));
-
-            println!("Failed login {} status: {:?}", i, response.status());
 
             responses.push(response.status());
             sleep(Duration::from_millis(100)).await;
