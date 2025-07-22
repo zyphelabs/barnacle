@@ -186,7 +186,13 @@ where
 
             if let Some(api_key) = api_key {
                 // Validate the API key
-                let validation_result = api_key_store.validate_key(&api_key).await;
+                let validation_result = match api_key_store.validate_key(&api_key).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        tracing::warn!("API key validation error: {}", error);
+                        return Ok(error.into_response());
+                    }
+                };
 
                 if !validation_result.valid {
                     tracing::warn!("Invalid API key: {}", api_key);
@@ -316,7 +322,13 @@ where
 
             if let Some(api_key) = api_key {
                 // 1. Try the main API key store first (usually Redis cache)
-                let mut validation_result = api_key_store.validate_key(&api_key).await;
+                let mut validation_result = match api_key_store.validate_key(&api_key).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        tracing::warn!("API key validation error: {}", error);
+                        return Ok(error.into_response());
+                    }
+                };
 
                 // 2. If validation failed and we have a custom validator, try it
                 if !validation_result.valid {
@@ -325,7 +337,14 @@ where
                             "API key not found in main store, trying custom validator: {}",
                             api_key
                         );
-                        let custom_result = custom_validator.validate_key(&api_key).await;
+                        let custom_result = match custom_validator.validate_key(&api_key).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::warn!("Custom validator error: {}", e);
+                                return Ok(e.into_response());
+                            }
+                        };
+
                         if custom_result.valid {
                             tracing::debug!(
                                 "API key validated successfully by custom validator: {}",
