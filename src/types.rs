@@ -104,7 +104,7 @@ impl<T> ApiKeyExtractionResult<T> {
         // Create context
         let barnacle_context = BarnacleContext {
             key: BarnacleKey::ApiKey(api_key.clone()),
-            path: request.uri().path().to_string(),
+            path: original_path.to_string(),
             method: request.method().to_string(),
         };
 
