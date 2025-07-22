@@ -263,7 +263,7 @@ impl ApiKeyStore<String> for RedisApiKeyStore {
 
         if !key_exists {
             tracing::debug!("API key not found: {}", api_key);
-            return Err(BarnacleError::invalid_api_key("API key not found"));
+            return Ok(ApiKeyValidationResult::invalid());
         }
 
         // Try to get custom configuration for this key
@@ -342,7 +342,7 @@ impl ApiKeyStore<String> for StaticApiKeyStore {
                 config.clone(),
             ))
         } else {
-            Err(BarnacleError::invalid_api_key(api_key))
+            Ok(ApiKeyValidationResult::invalid())
         }
     }
 
