@@ -10,7 +10,7 @@ pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
 #[derive(Clone, Debug)]
 pub struct ApiKeyExtractionResult<T = Vec<String>> {
     pub api_key: String,
-    pub query_param_exists: bool,
+    pub query_params: HashMap<String, String>,
     pub matched_path: String,
     pub original_path: String,
     pub extracted_data: Option<T>,
@@ -21,7 +21,7 @@ pub struct ApiKeyExtractionResult<T = Vec<String>> {
 impl<T> ApiKeyExtractionResult<T> {
     pub fn new(
         api_key: String,
-        query_param_exists: bool,
+        query_params: HashMap<String, String>,
         matched_path: String,
         original_path: String,
         extracted_data: Option<T>,
@@ -30,7 +30,7 @@ impl<T> ApiKeyExtractionResult<T> {
     ) -> Self {
         Self {
             api_key,
-            query_param_exists,
+            query_params,
             matched_path,
             original_path,
             extracted_data,
@@ -42,24 +42,37 @@ impl<T> ApiKeyExtractionResult<T> {
     /// New simple API: closure receives (original_path, matched_path) and returns Option<U>
     pub fn extract_request_data<B, U, F>(
         request: &axum::extract::Request<B>,
-        query_param: Option<&str>,
+        header_name: &str,
         extractor: F,
     ) -> Result<ApiKeyExtractionResult<U>, crate::error::BarnacleError>
     where
         F: Fn(&str, &str) -> Option<U>,
     {
-        // Extract API key from header
+        // Extract API key from header using configurable header name
         let api_key = request
             .headers()
-            .get("x-api-key")
+            .get(header_name)
             .and_then(|h| h.to_str().ok())
             .map(|s| s.to_string())
             .ok_or(crate::error::BarnacleError::ApiKeyMissing)?;
 
-        let query_param_exists = request
+        // Extract all query parameters
+        let query_params = request
             .uri()
             .query()
-            .is_some_and(|q| query_param.is_some_and(|param| q.contains(param)));
+            .map(|query_string| {
+                let mut params = HashMap::new();
+                for param in query_string.split('&') {
+                    if let Some((key, value)) = param.split_once('=') {
+                        params.insert(key.to_string(), value.to_string());
+                    } else {
+                        // Parameter without value (e.g., ?debug)
+                        params.insert(param.to_string(), String::new());
+                    }
+                }
+                params
+            })
+            .unwrap_or_default();
 
         // Extract matched path from request extensions
         let matched_path = request
@@ -97,7 +110,7 @@ impl<T> ApiKeyExtractionResult<T> {
 
         Ok(ApiKeyExtractionResult::new(
             api_key,
-            query_param_exists,
+            query_params,
             matched_path,
             original_path,
             extracted_data,
