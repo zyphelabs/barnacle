@@ -8,43 +8,47 @@ pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
 
 /// Result of API key extraction from a request
 #[derive(Clone, Debug)]
-pub struct ApiKeyExtractionResult {
+pub struct ApiKeyExtractionResult<T = Vec<String>> {
     pub api_key: String,
-    pub is_sandbox: bool,
+    pub query_param_exists: bool,
     pub matched_path: String,
     pub original_path: String,
-    pub ids_from_path: Vec<String>,
+    pub extracted_data: Option<T>,
     pub origin: String,
     pub barnacle_context: BarnacleContext,
 }
 
-impl ApiKeyExtractionResult {
+impl<T> ApiKeyExtractionResult<T> {
     pub fn new(
         api_key: String,
-        is_sandbox: bool,
+        query_param_exists: bool,
         matched_path: String,
         original_path: String,
-        ids_from_path: Vec<String>,
+        extracted_data: Option<T>,
         origin: String,
         barnacle_context: BarnacleContext,
     ) -> Self {
         Self {
             api_key,
-            is_sandbox,
+            query_param_exists,
             matched_path,
             original_path,
-            ids_from_path,
+            extracted_data,
             origin,
             barnacle_context,
         }
     }
 
-    /// Extract API key and sandbox information from an HTTP request
-    pub fn extract_api_key_values<B>(
+    /// New simple API: closure receives (original_path, matched_path) and returns Option<U>
+    pub fn extract_request_data<B, U, F>(
         request: &axum::extract::Request<B>,
-        ids_indexes: Vec<usize>,
-    ) -> Result<ApiKeyExtractionResult, crate::error::BarnacleError> {
-        // Extract API key from header - return error if missing
+        query_param: Option<&str>,
+        extractor: F,
+    ) -> Result<ApiKeyExtractionResult<U>, crate::error::BarnacleError>
+    where
+        F: Fn(&str, &str) -> Option<U>,
+    {
+        // Extract API key from header
         let api_key = request
             .headers()
             .get("x-api-key")
@@ -52,14 +56,12 @@ impl ApiKeyExtractionResult {
             .map(|s| s.to_string())
             .ok_or(crate::error::BarnacleError::ApiKeyMissing)?;
 
-        // Check if sandbox mode is enabled by looking at query parameters
-        let is_sandbox = request
+        let query_param_exists = request
             .uri()
             .query()
-            .unwrap_or_default()
-            .contains("sandbox=true");
+            .is_some_and(|q| query_param.is_some_and(|param| q.contains(param)));
 
-        // Extract matched path from request extensions, fallback to URI path
+        // Extract matched path from request extensions
         let matched_path = request
             .extensions()
             .get::<axum::extract::MatchedPath>()
@@ -67,7 +69,7 @@ impl ApiKeyExtractionResult {
             .unwrap_or(request.uri().path())
             .to_string();
 
-        // Extract original path from request extensions, fallback to URI path
+        // Extract original path from request extensions
         let original_path = request
             .extensions()
             .get::<axum::extract::OriginalUri>()
@@ -75,9 +77,10 @@ impl ApiKeyExtractionResult {
             .unwrap_or(request.uri().path())
             .to_string();
 
-        let ids_from_path = Self::extract_ids_from_path(&original_path, ids_indexes);
+        // Use the extractor closure
+        let extracted_data = extractor(&original_path, &matched_path);
 
-        // Extract origin from ORIGIN header
+        // Extract origin header
         let origin = request
             .headers()
             .get(ORIGIN)
@@ -85,7 +88,7 @@ impl ApiKeyExtractionResult {
             .unwrap_or("")
             .to_string();
 
-        // Create BarnacleContext with the API key
+        // Create context
         let barnacle_context = BarnacleContext {
             key: BarnacleKey::ApiKey(api_key.clone()),
             path: request.uri().path().to_string(),
@@ -94,29 +97,13 @@ impl ApiKeyExtractionResult {
 
         Ok(ApiKeyExtractionResult::new(
             api_key,
-            is_sandbox,
+            query_param_exists,
             matched_path,
             original_path,
-            ids_from_path,
+            extracted_data,
             origin,
             barnacle_context,
         ))
-    }
-
-    fn extract_ids_from_path(path: &str, ids_indexes: Vec<usize>) -> Vec<String> {
-        ids_indexes
-            .iter()
-            .map(|index| Self::extract_path_segment(path, *index).unwrap_or_default())
-            .collect()
-    }
-
-    /// Extract a specific segment from a path by index (0-based)
-    /// Example: extract_path_segment("/api/organizations/123/users", 2) returns Some("123")
-    fn extract_path_segment(path: &str, segment_index: usize) -> Option<String> {
-        path.split('/')
-            .nth(segment_index)
-            .filter(|segment| !segment.is_empty())
-            .map(|segment| segment.to_string())
     }
 }
 
