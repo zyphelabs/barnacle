@@ -1,8 +1,124 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use axum::http::header::ORIGIN;
+
 /// Special constant to indicate a placeholder key that should be replaced
 pub const NO_KEY: &str = "__BARNACLE_NO_KEY_PLACEHOLDER__";
+
+/// Result of API key extraction from a request
+#[derive(Clone, Debug)]
+pub struct ApiKeyExtractionResult<T = Vec<String>> {
+    pub api_key: String,
+    pub query_params: HashMap<String, String>,
+    pub matched_path: String,
+    pub original_path: String,
+    pub extracted_data: Option<T>,
+    pub origin: String,
+    pub barnacle_context: BarnacleContext,
+}
+
+impl<T> ApiKeyExtractionResult<T> {
+    pub fn new(
+        api_key: String,
+        query_params: HashMap<String, String>,
+        matched_path: String,
+        original_path: String,
+        extracted_data: Option<T>,
+        origin: String,
+        barnacle_context: BarnacleContext,
+    ) -> Self {
+        Self {
+            api_key,
+            query_params,
+            matched_path,
+            original_path,
+            extracted_data,
+            origin,
+            barnacle_context,
+        }
+    }
+
+    /// New simple API: closure receives (original_path, matched_path) and returns Option<U>
+    pub fn extract_request_data<B, U, F>(
+        request: &axum::extract::Request<B>,
+        header_name: &str,
+        extractor: F,
+    ) -> Result<ApiKeyExtractionResult<U>, crate::error::BarnacleError>
+    where
+        F: Fn(&str, &str) -> Option<U>,
+    {
+        // Extract API key from header using configurable header name
+        let api_key = request
+            .headers()
+            .get(header_name)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_string())
+            .ok_or(crate::error::BarnacleError::ApiKeyMissing)?;
+
+        // Extract all query parameters
+        let query_params = request
+            .uri()
+            .query()
+            .map(|query_string| {
+                let mut params = HashMap::new();
+                for param in query_string.split('&') {
+                    if let Some((key, value)) = param.split_once('=') {
+                        params.insert(key.to_string(), value.to_string());
+                    } else {
+                        // Parameter without value (e.g., ?debug)
+                        params.insert(param.to_string(), String::new());
+                    }
+                }
+                params
+            })
+            .unwrap_or_default();
+
+        // Extract matched path from request extensions
+        let matched_path = request
+            .extensions()
+            .get::<axum::extract::MatchedPath>()
+            .map(|p| p.as_str())
+            .unwrap_or(request.uri().path())
+            .to_string();
+
+        // Extract original path from request extensions
+        let original_path = request
+            .extensions()
+            .get::<axum::extract::OriginalUri>()
+            .map(|original_uri| original_uri.path())
+            .unwrap_or(request.uri().path())
+            .to_string();
+
+        // Use the extractor closure
+        let extracted_data = extractor(&original_path, &matched_path);
+
+        // Extract origin header
+        let origin = request
+            .headers()
+            .get(ORIGIN)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        // Create context
+        let barnacle_context = BarnacleContext {
+            key: BarnacleKey::ApiKey(api_key.clone()),
+            path: original_path.to_string(),
+            method: request.method().to_string(),
+        };
+
+        Ok(ApiKeyExtractionResult::new(
+            api_key,
+            query_params,
+            matched_path,
+            original_path,
+            extracted_data,
+            origin,
+            barnacle_context,
+        ))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ResetOnSuccess {
@@ -30,6 +146,14 @@ impl Default for BarnacleConfig {
 }
 
 impl BarnacleConfig {
+    pub fn new(max_requests: u32, window: Duration) -> Self {
+        Self {
+            max_requests,
+            window,
+            reset_on_success: ResetOnSuccess::Not,
+        }
+    }
+
     /// Check if a status code should be considered successful for rate limit reset
     pub fn is_success_status(&self, status_code: u16) -> bool {
         match &self.reset_on_success {
@@ -86,25 +210,25 @@ pub struct BarnacleResult {
 
 /// API key validation result
 #[derive(Clone, Debug)]
-pub struct ApiKeyValidationResult {
+pub struct ApiKeyValidationResult<T> {
     pub valid: bool,
-    pub key_id: Option<String>,
+    pub key: Option<T>,
     pub rate_limit_config: Option<BarnacleConfig>,
 }
 
-impl ApiKeyValidationResult {
-    pub fn valid_with_config(key_id: String, config: BarnacleConfig) -> Self {
+impl<T> ApiKeyValidationResult<T> {
+    pub fn valid_with_config(key: T, config: BarnacleConfig) -> Self {
         Self {
             valid: true,
-            key_id: Some(key_id),
+            key: Some(key),
             rate_limit_config: Some(config),
         }
     }
 
-    pub fn valid_with_default_config(key_id: String) -> Self {
+    pub fn valid_with_default_config(key: T) -> Self {
         Self {
             valid: true,
-            key_id: Some(key_id),
+            key: Some(key),
             rate_limit_config: Some(BarnacleConfig::default()),
         }
     }
@@ -112,9 +236,15 @@ impl ApiKeyValidationResult {
     pub fn invalid() -> Self {
         Self {
             valid: false,
-            key_id: None,
+            key: None,
             rate_limit_config: None,
         }
+    }
+}
+
+impl ApiKeyValidationResult<String> {
+    pub fn valid_string_key(key: String, config: BarnacleConfig) -> Self {
+        Self::valid_with_config(key, config)
     }
 }
 

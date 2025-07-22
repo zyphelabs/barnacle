@@ -9,9 +9,10 @@ use crate::types::{ApiKeyValidationResult, BarnacleConfig, StaticApiKeyConfig};
 
 /// Trait for API key validation and configuration retrieval
 #[async_trait]
-pub trait ApiKeyStore: Send + Sync {
+pub trait ApiKeyStore<T = String>: Send + Sync {
     /// Validate an API key and return its configuration
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult;
+    async fn validate_key(&self, api_key: &str)
+        -> Result<ApiKeyValidationResult<T>, BarnacleError>;
 
     /// Optional: Get rate limit configuration for a specific key
     /// This allows for dynamic per-key configuration
@@ -140,7 +141,7 @@ impl RedisApiKeyStore {
         validator: F,
         config: Option<&BarnacleConfig>,
         ttl_seconds: Option<u64>,
-    ) -> Result<ApiKeyValidationResult, E>
+    ) -> Result<ApiKeyValidationResult<String>, E>
     where
         F: FnOnce(String) -> Fut,
         Fut: std::future::Future<Output = Result<Option<String>, E>>,
@@ -149,9 +150,11 @@ impl RedisApiKeyStore {
         // First try Redis
         let validation_result = self.validate_key(api_key).await;
 
-        if validation_result.valid {
-            tracing::debug!("API key found in Redis cache: {}", api_key);
-            return Ok(validation_result);
+        if let Ok(result) = validation_result {
+            if result.valid {
+                tracing::debug!("API key found in Redis cache: {}", api_key);
+                return Ok(result);
+            }
         }
 
         // If not in Redis, validate with the provided function
@@ -225,8 +228,11 @@ impl RedisApiKeyStore {
 
 #[cfg(feature = "redis")]
 #[async_trait]
-impl ApiKeyStore for RedisApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
+impl ApiKeyStore<String> for RedisApiKeyStore {
+    async fn validate_key(
+        &self,
+        api_key: &str,
+    ) -> Result<ApiKeyValidationResult<String>, BarnacleError> {
         let redis_key = self.get_redis_key(api_key);
         let config_key = self.get_config_key(api_key);
 
@@ -236,7 +242,10 @@ impl ApiKeyStore for RedisApiKeyStore {
             Ok(conn) => conn,
             Err(e) => {
                 tracing::error!("Redis connection error during API key validation: {}", e);
-                return ApiKeyValidationResult::invalid();
+                return Err(BarnacleError::connection_pool_error(
+                    "Redis connection error",
+                    Box::new(e),
+                ));
             }
         };
 
@@ -245,13 +254,16 @@ impl ApiKeyStore for RedisApiKeyStore {
             Ok(exists) => exists,
             Err(e) => {
                 tracing::error!("Redis EXISTS operation failed for API key: {}", e);
-                return ApiKeyValidationResult::invalid();
+                return Err(BarnacleError::store_error_with_source(
+                    "Redis EXISTS operation failed",
+                    Box::new(e),
+                ));
             }
         };
 
         if !key_exists {
             tracing::debug!("API key not found: {}", api_key);
-            return ApiKeyValidationResult::invalid();
+            return Ok(ApiKeyValidationResult::invalid());
         }
 
         // Try to get custom configuration for this key
@@ -276,7 +288,10 @@ impl ApiKeyStore for RedisApiKeyStore {
             self.default_config.clone()
         };
 
-        ApiKeyValidationResult::valid_with_config(api_key.to_string(), rate_limit_config)
+        Ok(ApiKeyValidationResult::valid_with_config(
+            api_key.to_string(),
+            rate_limit_config,
+        ))
     }
 
     async fn get_rate_limit_config(&self, api_key: &str) -> Option<BarnacleConfig> {
@@ -315,13 +330,19 @@ impl StaticApiKeyStore {
 }
 
 #[async_trait]
-impl ApiKeyStore for StaticApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
+impl ApiKeyStore<String> for StaticApiKeyStore {
+    async fn validate_key(
+        &self,
+        api_key: &str,
+    ) -> Result<ApiKeyValidationResult<String>, BarnacleError> {
         if self.config.key_configs.contains_key(api_key) {
             let config = self.config.get_config_for_key(api_key);
-            ApiKeyValidationResult::valid_with_config(api_key.to_string(), config.clone())
+            Ok(ApiKeyValidationResult::valid_with_config(
+                api_key.to_string(),
+                config.clone(),
+            ))
         } else {
-            ApiKeyValidationResult::invalid()
+            Ok(ApiKeyValidationResult::invalid())
         }
     }
 

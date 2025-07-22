@@ -33,8 +33,11 @@ impl Default for PostgresApiKeyStore {
 }
 
 #[async_trait]
-impl ApiKeyStore for PostgresApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
+impl ApiKeyStore<String> for PostgresApiKeyStore {
+    async fn validate_key(
+        &self,
+        api_key: &str,
+    ) -> Result<ApiKeyValidationResult<String>, barnacle_rs::BarnacleError> {
         println!(
             "🔍 PostgresApiKeyStore: Validating key {} (simulating DB lookup)",
             api_key
@@ -48,17 +51,17 @@ impl ApiKeyStore for PostgresApiKeyStore {
                 "✅ PostgresApiKeyStore: Key {} is valid for user {}",
                 api_key, user_id
             );
-            ApiKeyValidationResult::valid_with_config(
+            Ok(ApiKeyValidationResult::valid_with_config(
                 user_id.clone(),
                 BarnacleConfig {
                     max_requests: 10,
                     window: Duration::from_secs(60),
                     reset_on_success: barnacle_rs::ResetOnSuccess::Not,
                 },
-            )
+            ))
         } else {
             println!("❌ PostgresApiKeyStore: Key {} is invalid", api_key);
-            ApiKeyValidationResult::invalid()
+            Ok(ApiKeyValidationResult::invalid())
         }
     }
 }

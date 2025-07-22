@@ -80,6 +80,9 @@ pub enum BarnacleError {
         message: String,
         status_code: Option<StatusCode>,
     },
+
+    #[error("Permission denied: {reason}")]
+    PermissionDenied { reason: String },
 }
 
 impl BarnacleError {
@@ -201,6 +204,7 @@ impl BarnacleError {
             BarnacleError::JsonError { .. } => StatusCode::BAD_REQUEST,
             BarnacleError::RequestParsing { .. } => StatusCode::BAD_REQUEST,
             BarnacleError::Internal { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+            BarnacleError::PermissionDenied { .. } => StatusCode::FORBIDDEN,
             BarnacleError::Custom { status_code, .. } => {
                 status_code.unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
             }
@@ -273,6 +277,7 @@ impl BarnacleError {
             BarnacleError::JsonError { .. } => "JSON_ERROR",
             BarnacleError::RequestParsing { .. } => "REQUEST_PARSING_ERROR",
             BarnacleError::Internal { .. } => "INTERNAL_ERROR",
+            BarnacleError::PermissionDenied { .. } => "PERMISSION_DENIED",
             BarnacleError::Custom { .. } => "CUSTOM_ERROR",
         }
     }
@@ -289,6 +294,7 @@ impl BarnacleError {
             BarnacleError::Redis { .. } => "backend",
             BarnacleError::Configuration { .. } | BarnacleError::Internal { .. } => "server",
             BarnacleError::JsonError { .. } | BarnacleError::RequestParsing { .. } => "client",
+            BarnacleError::PermissionDenied { .. } => "authentication",
             BarnacleError::Custom { .. } => "custom",
         }
     }

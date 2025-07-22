@@ -32,7 +32,7 @@ impl<A, S, C> Clone for ApiKeyLayer<A, S, C> {
 
 impl<A, S> ApiKeyLayer<A, S, ()>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
 {
     pub fn new(
@@ -51,9 +51,9 @@ where
 
 impl<A, S, C> ApiKeyLayer<A, S, C>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
-    C: ApiKeyStore + 'static,
+    C: ApiKeyStore<String> + 'static,
 {
     /// Add a custom validator that will be used as fallback when the main api_key_store fails
     /// The custom validator will be called if the main store returns invalid, and if it returns
@@ -65,7 +65,7 @@ where
         custom_validator: Arc<NewC>,
     ) -> ApiKeyLayer<A, S, NewC>
     where
-        NewC: ApiKeyStore + 'static,
+        NewC: ApiKeyStore<String> + 'static,
     {
         ApiKeyLayer {
             api_key_store,
@@ -79,7 +79,7 @@ where
 // Implementation for the case without custom validator (C = ())
 impl<Inner, A, S> Layer<Inner> for ApiKeyLayer<A, S, ()>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
 {
     type Service = ApiKeyMiddleware<Inner, A, S, ()>;
@@ -98,9 +98,9 @@ where
 // Implementation for the case with custom validator (C: ApiKeyStore)
 impl<Inner, A, S, C> Layer<Inner> for ApiKeyLayer<A, S, C>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
-    C: ApiKeyStore + 'static,
+    C: ApiKeyStore<String> + 'static,
 {
     type Service = ApiKeyMiddleware<Inner, A, S, C>;
 
@@ -145,7 +145,7 @@ where
     Inner: Service<Request<B>, Response = Response<Body>> + Clone + Send + 'static,
     Inner::Future: Send + 'static,
     B: Send + 'static,
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
 {
     type Response = Inner::Response;
@@ -186,7 +186,13 @@ where
 
             if let Some(api_key) = api_key {
                 // Validate the API key
-                let validation_result = api_key_store.validate_key(&api_key).await;
+                let validation_result = match api_key_store.validate_key(&api_key).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        tracing::warn!("API key validation error: {}", error);
+                        return Ok(error.into_response());
+                    }
+                };
 
                 if !validation_result.valid {
                     tracing::warn!("Invalid API key: {}", api_key);
@@ -274,9 +280,9 @@ where
     Inner: Service<Request<B>, Response = Response<Body>> + Clone + Send + 'static,
     Inner::Future: Send + 'static,
     B: Send + 'static,
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
-    C: ApiKeyStore + 'static,
+    C: ApiKeyStore<String> + 'static,
 {
     type Response = Inner::Response;
     type Error = Inner::Error;
@@ -316,7 +322,13 @@ where
 
             if let Some(api_key) = api_key {
                 // 1. Try the main API key store first (usually Redis cache)
-                let mut validation_result = api_key_store.validate_key(&api_key).await;
+                let mut validation_result = match api_key_store.validate_key(&api_key).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        tracing::warn!("API key validation error: {}", error);
+                        return Ok(error.into_response());
+                    }
+                };
 
                 // 2. If validation failed and we have a custom validator, try it
                 if !validation_result.valid {
@@ -325,7 +337,14 @@ where
                             "API key not found in main store, trying custom validator: {}",
                             api_key
                         );
-                        let custom_result = custom_validator.validate_key(&api_key).await;
+                        let custom_result = match custom_validator.validate_key(&api_key).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                tracing::warn!("Custom validator error: {}", e);
+                                return Ok(e.into_response());
+                            }
+                        };
+
                         if custom_result.valid {
                             tracing::debug!(
                                 "API key validated successfully by custom validator: {}",
@@ -474,7 +493,7 @@ async fn handle_rate_limit_reset<S>(
 
 pub fn create_api_key_layer<A, S>(api_key_store: A, rate_limit_store: S) -> ApiKeyLayer<A, S>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
 {
     ApiKeyLayer::new(
@@ -490,7 +509,7 @@ pub fn create_api_key_layer_with_config<A, S>(
     config: ApiKeyMiddlewareConfig,
 ) -> ApiKeyLayer<A, S>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
 {
     ApiKeyLayer::new(Arc::new(api_key_store), Arc::new(rate_limit_store), config)
@@ -503,9 +522,9 @@ pub fn create_api_key_layer_with_custom_validator<A, S, C>(
     config: ApiKeyMiddlewareConfig,
 ) -> ApiKeyLayer<A, S, C>
 where
-    A: ApiKeyStore + 'static,
+    A: ApiKeyStore<String> + 'static,
     S: BarnacleStore + 'static,
-    C: ApiKeyStore + 'static,
+    C: ApiKeyStore<String> + 'static,
 {
     ApiKeyLayer {
         api_key_store: Arc::new(api_key_store),
