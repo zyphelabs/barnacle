@@ -33,8 +33,8 @@ impl Default for PostgresApiKeyStore {
 }
 
 #[async_trait]
-impl ApiKeyStore for PostgresApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
+impl ApiKeyStore<String> for PostgresApiKeyStore {
+    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult<String> {
         println!(
             "🔍 PostgresApiKeyStore: Validating key {} (simulating DB lookup)",
             api_key

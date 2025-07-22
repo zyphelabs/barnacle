@@ -9,9 +9,9 @@ use crate::types::{ApiKeyValidationResult, BarnacleConfig, StaticApiKeyConfig};
 
 /// Trait for API key validation and configuration retrieval
 #[async_trait]
-pub trait ApiKeyStore: Send + Sync {
+pub trait ApiKeyStore<T = String>: Send + Sync {
     /// Validate an API key and return its configuration
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult;
+    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult<T>;
 
     /// Optional: Get rate limit configuration for a specific key
     /// This allows for dynamic per-key configuration
@@ -140,7 +140,7 @@ impl RedisApiKeyStore {
         validator: F,
         config: Option<&BarnacleConfig>,
         ttl_seconds: Option<u64>,
-    ) -> Result<ApiKeyValidationResult, E>
+    ) -> Result<ApiKeyValidationResult<String>, E>
     where
         F: FnOnce(String) -> Fut,
         Fut: std::future::Future<Output = Result<Option<String>, E>>,
@@ -225,8 +225,8 @@ impl RedisApiKeyStore {
 
 #[cfg(feature = "redis")]
 #[async_trait]
-impl ApiKeyStore for RedisApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
+impl ApiKeyStore<String> for RedisApiKeyStore {
+    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult<String> {
         let redis_key = self.get_redis_key(api_key);
         let config_key = self.get_config_key(api_key);
 
@@ -315,8 +315,8 @@ impl StaticApiKeyStore {
 }
 
 #[async_trait]
-impl ApiKeyStore for StaticApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
+impl ApiKeyStore<String> for StaticApiKeyStore {
+    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult<String> {
         if self.config.key_configs.contains_key(api_key) {
             let config = self.config.get_config_for_key(api_key);
             ApiKeyValidationResult::valid_with_config(api_key.to_string(), config.clone())
