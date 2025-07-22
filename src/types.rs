@@ -146,6 +146,14 @@ impl Default for BarnacleConfig {
 }
 
 impl BarnacleConfig {
+    pub fn new(max_requests: u32, window: Duration) -> Self {
+        Self {
+            max_requests,
+            window,
+            reset_on_success: ResetOnSuccess::Not,
+        }
+    }
+
     /// Check if a status code should be considered successful for rate limit reset
     pub fn is_success_status(&self, status_code: u16) -> bool {
         match &self.reset_on_success {
