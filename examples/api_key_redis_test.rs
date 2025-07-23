@@ -15,7 +15,7 @@ async fn main() {
         ..Default::default()
     };
     let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
-        if api_key != "redis-key" {
+        if api_key != "valid-key-123" {
             Err(BarnacleError::invalid_api_key(api_key))
         } else {
             Ok(())

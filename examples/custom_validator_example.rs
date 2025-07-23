@@ -8,7 +8,6 @@ use axum::http::request::Parts;
 
 /// Example custom API key store that validates against a "database"
 /// (in this case, just hardcoded keys for demonstration)
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct PostgresApiKeyStore {
     // In a real implementation, this would be a database connection pool
@@ -71,7 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reset_on_success: barnacle_rs::ResetOnSuccess::Not,
     };
     let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: Arc<PostgresApiKeyStore>| async move {
-        if api_key == "valid" {
+        // Check if the api_key exists in the PostgresApiKeyStore
+        if _state.valid_keys.contains_key(&api_key) {
             Ok(())
         } else {
             Err(BarnacleError::invalid_api_key(api_key))

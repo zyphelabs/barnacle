@@ -384,12 +384,20 @@ where
             debug!("[middleware.rs] About to call validator with key: '{}'", api_key);
 
             let validation_result = if let Some(validator) = api_key_validator.as_ref() {
-                match state {
-                    Some(state) => {
-                        validator.call(api_key.to_string(), api_key_config, Arc::new(parts.clone()), state).await
-                    }
-                    None => {
-                        Err(E::from(BarnacleError::ApiKeyMissing))
+                let is_stateless_validator = std::any::TypeId::of::<V>() == std::any::TypeId::of::<()>();
+                let is_unit_state = std::any::TypeId::of::<State>() == std::any::TypeId::of::<()>();
+                if is_stateless_validator && is_unit_state {
+                    // Both validator and state are (), safe to call with zeroed State
+                    validator.call(api_key.to_string(), api_key_config, Arc::new(parts.clone()), unsafe { std::mem::zeroed() }).await
+                } else {
+                    match state {
+                        Some(state) => {
+                            validator.call(api_key.to_string(), api_key_config, Arc::new(parts.clone()), state).await
+                        }
+                        None => {
+                            // Return a more appropriate error for missing validator state
+                            Err(E::from(BarnacleError::custom("Barnacle: API key validator requires state, but none was provided. Use with_state() or use () for stateless validators.", None)))
+                        }
                     }
                 }
             } else {

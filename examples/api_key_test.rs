@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
         if api_key.is_empty() {
             Err(BarnacleError::ApiKeyMissing)
-        } else if api_key != "test-key" {
+        } else if api_key != "test_key_123" {
             Err(BarnacleError::invalid_api_key(api_key))
         } else {
             Ok(())
@@ -49,7 +49,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_store(store)
         .with_config(config)
         .with_api_key_validator(api_key_validator)
-        .with_state(())
         .build()
         .unwrap();
 

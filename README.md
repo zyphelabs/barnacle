@@ -22,11 +22,13 @@ Rate limiting and API key validation middleware for Axum with Redis backend.
 - **Reset on Success**: Optional rate limit reset on successful operations
 - **Extensible Design**: Custom key stores and rate limiting strategies
 
-## Quick Start
+## Examples
+
+### Quick Start
 
 ```toml
 [dependencies]
-barnacle-rs = "0.2.0"
+barnacle-rs = "0.3"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 ```
@@ -74,7 +76,7 @@ use axum::http::request::Parts;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = RedisBarnacleStore::from_url("redis://127.0.0.1:6379").await?;
     let config = BarnacleConfig::default();
-    let api_key_validator = |api_key: String, _api_key_config: BarnacleConfig, _parts: Arc<Parts>, _state: ()| async move {
+    let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
         if api_key.is_empty() {
             Err(BarnacleError::ApiKeyMissing)
         } else if api_key != "test-key" {
@@ -87,7 +89,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_store(store)
         .with_config(config)
         .with_api_key_validator(api_key_validator)
-        .with_state(())
         .build()
         .unwrap();
     let app = Router::new()
@@ -103,7 +104,7 @@ async fn handler() -> &'static str {
 }
 ```
 
-### API Key Validation (With State)
+### API Key Validation (With state)
 
 ```rust
 use barnacle_rs::{BarnacleLayer, BarnacleConfig, RedisBarnacleStore, BarnacleError};
@@ -161,7 +162,7 @@ struct LoginRequest {
     password: String,
 }
 impl KeyExtractable for LoginRequest {
-    fn extract_key(&self, _request_parts: &Parts) -> BarnacleKey {
+    fn extract_key(&self) -> BarnacleKey {
         BarnacleKey::Email(self.email.clone())
     }
 }
@@ -171,21 +172,9 @@ let layer = barnacle_rs::BarnacleLayer::builder()
     .build();
 ```
 
-## Configuration
+### Rate Limiting Strategies
 
-```rust
-let config = BarnacleConfig {
-    max_requests: 100,                              // Requests per window
-    window: Duration::from_secs(3600),              // Time window
-    reset_on_success: ResetOnSuccess::Yes(          // Reset on success
-        Some(vec![200, 201])                        // Status codes to reset on
-    ),
-};
-```
-
-## Rate Limiting Strategies
-
-### IP-based (default)
+#### IP-based (default)
 
 ```rust
 let layer = barnacle_rs::BarnacleLayer::builder()
@@ -194,16 +183,16 @@ let layer = barnacle_rs::BarnacleLayer::builder()
     .build();
 ```
 
-### API Key-based
+#### API Key-based
 
 ```rust
 let layer = barnacle_rs::BarnacleLayer::builder()
     .with_store(api_key_store)
-    .with_config(rate_limit_store)
+    .with_config(config)
     .build();
 ```
 
-### Custom Key (e.g., email)
+#### Custom Key (e.g., email)
 
 ```rust
 use barnacle_rs::{KeyExtractable, BarnacleKey};
@@ -225,6 +214,77 @@ let layer = barnacle_rs::BarnacleLayer::builder()
     .with_store(store)
     .with_config(config)
     .build();
+```
+
+### Example: No Validator (API key validation disabled)
+
+```rust
+use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, BarnacleError};
+
+let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, ()> = BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .build()
+    .unwrap();
+```
+
+### Example: With Validator (API key validation enabled)
+
+```rust
+use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, BarnacleError};
+use std::sync::Arc;
+use axum::http::request::Parts;
+
+let api_key_validator = |api_key: String, api_key_config: ApiKeyConfig, parts: Arc<Parts>, state: ()| async move {
+    if api_key == "test-key" {
+        Ok(())
+    } else {
+        Err(BarnacleError::invalid_api_key(api_key))
+    }
+};
+
+let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, _> = BarnacleLayer::builder()
+    .with_store(store)
+    .with_config(config)
+    .with_api_key_validator(api_key_validator)
+    .with_state(())
+    .build()
+    .unwrap();
+```
+
+**Note:**
+- The validator closure must take owned arguments: `(String, ApiKeyConfig, Arc<Parts>, State)`.
+- If you do not provide a validator, use `()` for the last type parameter.
+- If you provide a validator, use `_` for the last type parameter to let Rust infer the closure type.
+
+### Running Examples
+
+```bash
+# Run examples
+cargo run --example basic
+cargo run --example api_key_redis_test
+cargo run --example custom_validator_example
+cargo run --example error_integration
+cargo run --example api_key_test
+```
+
+### Error Integration & Custom Validator
+
+For error handling and custom validator implementation, see:
+
+- `examples/error_integration.rs`
+- `examples/custom_validator_example.rs`
+
+## Configuration
+
+```rust
+let config = BarnacleConfig {
+    max_requests: 100,                              // Requests per window
+    window: Duration::from_secs(3600),              // Time window
+    reset_on_success: ResetOnSuccess::Yes(          // Reset on success
+        Some(vec![200, 201])                        // Status codes to reset on
+    ),
+};
 ```
 
 ## Automatic Route-Based Rate Limiting
@@ -259,24 +319,6 @@ redis-cli SET "barnacle:api_keys:your-key" 1
 redis-cli SET "barnacle:api_keys:config:your-key" '{"max_requests":100,"window":3600,"reset_on_success":"Not"}'
 ```
 
-### Error Integration & Custom Validator
-
-For error handling and custom validator implementation, see:
-
-- `examples/error_integration.rs`
-- `examples/custom_validator_example.rs`
-
-## Examples
-
-```bash
-# Run examples
-cargo run --example basic
-cargo run --example api_key_redis_test
-cargo run --example custom_validator_example
-cargo run --example error_integration
-cargo run --example api_key_test
-```
-
 ## License
 
 MIT
@@ -284,44 +326,3 @@ MIT
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Example: No Validator (API key validation disabled)
-
-```rust
-use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, BarnacleError};
-
-let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, ()> = BarnacleLayer::builder()
-    .with_store(store)
-    .with_config(config)
-    .build()
-    .unwrap();
-```
-
-## Example: With Validator (API key validation enabled)
-
-```rust
-use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, BarnacleError};
-use std::sync::Arc;
-use axum::http::request::Parts;
-
-let api_key_validator = |api_key: String, api_key_config: ApiKeyConfig, parts: Arc<Parts>, state: ()| async move {
-    if api_key == "test-key" {
-        Ok(())
-    } else {
-        Err(BarnacleError::invalid_api_key(api_key))
-    }
-};
-
-let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, _> = BarnacleLayer::builder()
-    .with_store(store)
-    .with_config(config)
-    .with_api_key_validator(api_key_validator)
-    .with_state(())
-    .build()
-    .unwrap();
-```
-
-**Note:**
-- The validator closure must take owned arguments: `(String, ApiKeyConfig, Arc<Parts>, State)`.
-- If you do not provide a validator, use `()` for the last type parameter.
-- If you provide a validator, use `_` for the last type parameter to let Rust infer the closure type.
