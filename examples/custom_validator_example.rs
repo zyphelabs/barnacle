@@ -1,15 +1,14 @@
-use async_trait::async_trait;
 use axum::{response::Json, routing::get, Router};
-use barnacle_rs::{
-    create_api_key_layer_with_custom_validator, ApiKeyMiddlewareConfig, ApiKeyStore,
-    ApiKeyValidationResult, BarnacleConfig, RedisApiKeyStore, RedisBarnacleStore,
-};
+use barnacle_rs::{ApiKeyConfig, BarnacleConfig, BarnacleError, BarnacleLayer, RedisBarnacleStore};
 use serde_json::json;
 use std::time::Duration;
 use tower::ServiceBuilder;
+use std::sync::Arc;
+use axum::http::request::Parts;
 
 /// Example custom API key store that validates against a "database"
 /// (in this case, just hardcoded keys for demonstration)
+#[derive(Clone)]
 pub struct PostgresApiKeyStore {
     // In a real implementation, this would be a database connection pool
     valid_keys: std::collections::HashMap<String, String>,
@@ -29,37 +28,6 @@ impl PostgresApiKeyStore {
 impl Default for PostgresApiKeyStore {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[async_trait]
-impl ApiKeyStore for PostgresApiKeyStore {
-    async fn validate_key(&self, api_key: &str) -> ApiKeyValidationResult {
-        println!(
-            "🔍 PostgresApiKeyStore: Validating key {} (simulating DB lookup)",
-            api_key
-        );
-
-        // Simulate database latency
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        if let Some(user_id) = self.valid_keys.get(api_key) {
-            println!(
-                "✅ PostgresApiKeyStore: Key {} is valid for user {}",
-                api_key, user_id
-            );
-            ApiKeyValidationResult::valid_with_config(
-                user_id.clone(),
-                BarnacleConfig {
-                    max_requests: 10,
-                    window: Duration::from_secs(60),
-                    reset_on_success: barnacle_rs::ResetOnSuccess::Not,
-                },
-            )
-        } else {
-            println!("❌ PostgresApiKeyStore: Key {} is invalid", api_key);
-            ApiKeyValidationResult::invalid()
-        }
     }
 }
 
@@ -93,29 +61,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to create Redis pool");
 
     // Create the stores
-    let redis_store = RedisApiKeyStore::new(redis_pool.clone());
+    let store = RedisBarnacleStore::new(redis_pool.clone());
     let postgres_store = PostgresApiKeyStore::new();
-    let rate_limit_store = RedisBarnacleStore::new(redis_pool);
-
-    // Configure the middleware
-    let config = ApiKeyMiddlewareConfig {
-        header_name: "x-api-key".to_string(),
-        barnacle_config: BarnacleConfig {
-            max_requests: 5, // Default rate limit if not specified by store
-            window: Duration::from_secs(60),
-            reset_on_success: barnacle_rs::ResetOnSuccess::Not,
-        },
-        require_api_key: true,
-        cache_ttl_seconds: 30 * 60, // 30 minutes for this example
+    let state = Arc::new(postgres_store.clone());
+    let config = BarnacleConfig {
+        max_requests: 5, // Default rate limit if not specified by store
+        window: Duration::from_secs(60),
+        reset_on_success: barnacle_rs::ResetOnSuccess::Not,
     };
-
-    // Create the layer with custom validator
-    let auth_layer = create_api_key_layer_with_custom_validator(
-        redis_store,
-        rate_limit_store,
-        postgres_store,
-        config,
-    );
+    let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: Arc<PostgresApiKeyStore>| async move {
+        // Check if the api_key exists in the PostgresApiKeyStore
+        if _state.valid_keys.contains_key(&api_key) {
+            Ok(())
+        } else {
+            Err(BarnacleError::invalid_api_key(api_key))
+        }
+    };
+    let auth_layer: BarnacleLayer<(), _, _, _, _> = BarnacleLayer::builder()
+        .with_store(store)
+        .with_config(config)
+        .with_state(state.clone())
+        .with_api_key_validator(api_key_validator)
+        .build()
+        .unwrap();
 
     // Build the router
     let app = Router::new()

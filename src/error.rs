@@ -333,8 +333,6 @@ impl IntoResponse for BarnacleError {
     }
 }
 
-/// Result type alias for Barnacle operations
-pub type BarnacleResult<T> = Result<T, BarnacleError>;
 
 /// Convert from various error types into BarnacleError
 impl From<serde_json::Error> for BarnacleError {

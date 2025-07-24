@@ -1,16 +1,15 @@
 use std::time::Duration;
 
 use axum::{
-    http::{HeaderMap, StatusCode},
+    http::{request::Parts, HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::post,
     Router,
 };
-use barnacle_rs::{
-    create_api_key_layer_with_config, ApiKeyMiddlewareConfig, BarnacleConfig, RedisApiKeyStore,
-    RedisBarnacleStore, ResetOnSuccess,
-};
 use serde::{Deserialize, Serialize};
+use barnacle_rs::{ApiKeyConfig, BarnacleConfig, BarnacleLayer, RedisBarnacleStore};
+use std::sync::Arc;
+use barnacle_rs::BarnacleError;
 
 #[derive(Serialize, Deserialize)]
 struct TestResponse {
@@ -30,31 +29,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = RedisBarnacleStore::from_url(&redis_url)
         .map_err(|e| format!("Failed to create Redis store: {}", e))?;
 
-    // Create a separate API key store with its own pool
-    let api_key_store = RedisApiKeyStore::from_url(&redis_url)
-        .map_err(|e| format!("Failed to create API key store: {}", e))?;
-
-    // Configure rate limiting - NO reset on success
-    let config = ApiKeyMiddlewareConfig {
-        header_name: "x-api-key".to_string(),
-        barnacle_config: BarnacleConfig {
-            max_requests: 3,
-            window: Duration::from_secs(60),
-            reset_on_success: ResetOnSuccess::Not, // This is the key change
-        },
-        require_api_key: true,
-        cache_ttl_seconds: 60 * 60, // 1 hour cache for this test
+    let config = BarnacleConfig {
+        max_requests: 3,
+        window: Duration::from_secs(60),
+        reset_on_success: barnacle_rs::ResetOnSuccess::Not,
     };
 
-    // Save a test API key to Redis with the same config
-    api_key_store
-        .save_key("test_key_123", Some(&config.barnacle_config), Some(30))
-        .await
+    let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
+        if api_key.is_empty() {
+            Err(BarnacleError::ApiKeyMissing)
+        } else if api_key != "test_key_123" {
+            Err(BarnacleError::invalid_api_key(api_key))
+        } else {
+            Ok(())
+        }
+    };
+
+    let middleware: BarnacleLayer<(), _, _, BarnacleError, _> = BarnacleLayer::builder()
+        .with_store(store)
+        .with_config(config)
+        .with_api_key_validator(api_key_validator)
+        .build()
         .unwrap();
-
-    tracing::info!("Saved API key with config: {:?}", config.barnacle_config);
-
-    let middleware = create_api_key_layer_with_config(api_key_store, store, config);
 
     let app = Router::new().route("/test", post(test_endpoint).layer(middleware));
 

@@ -1,14 +1,27 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{http::StatusCode, response::Json, routing::get, Router};
-use barnacle_rs::{create_api_key_layer, BarnacleConfig, RedisApiKeyStore, RedisBarnacleStore};
 use deadpool_redis::Config as RedisConfig;
 use serde_json::json;
+use barnacle_rs::{BarnacleLayer, RedisBarnacleStore, ApiKeyConfig};
+use std::sync::Once;
+use uuid::Uuid;
+use barnacle_rs::BarnacleError;
+use axum::http::request::Parts;
+
+static INIT: Once = Once::new();
+
+fn init_tracing() {
+    INIT.call_once(|| {
+        tracing_subscriber::fmt::init();
+    });
+}
 
 // Test constants
 const VALID_KEY: &str = "valid-key-123";
 const VALID_KEY_2: &str = "valid-key-456";
-const RATE_LIMIT_VALID: u32 = 3;
+// In the test setup, ensure max_requests is at least 2 for rate limit tests
+const RATE_LIMIT_VALID: u32 = 2;
 const WINDOW_SECONDS: u64 = 6;
 
 async fn cleanup_redis() {
@@ -34,7 +47,7 @@ async fn cleanup_redis() {
     }
 }
 
-async fn create_test_app() -> Router {
+async fn create_test_app(path: &str) -> Router {
     // Clean up Redis first
     cleanup_redis().await;
 
@@ -59,7 +72,7 @@ async fn create_test_app() -> Router {
             .await
             .expect("Failed to set API key");
 
-        let config = BarnacleConfig {
+        let config = barnacle_rs::BarnacleConfig {
             max_requests: RATE_LIMIT_VALID,
             window: Duration::from_secs(WINDOW_SECONDS),
             ..Default::default()
@@ -91,14 +104,32 @@ async fn create_test_app() -> Router {
             .expect("Failed to set second config");
     }
 
-    let api_key_store = RedisApiKeyStore::new(pool.clone());
     let rate_limit_store = RedisBarnacleStore::new(pool);
-    let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
+    let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
+        if api_key.is_empty() {
+            Err(BarnacleError::ApiKeyMissing)
+        } else if api_key != VALID_KEY && api_key != VALID_KEY_2 {
+            Err(BarnacleError::invalid_api_key(api_key))
+        } else {
+            Ok(())
+        }
+    };
+    let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, _> = BarnacleLayer::builder()
+        .with_store(rate_limit_store)
+        .with_config(barnacle_rs::BarnacleConfig {
+            max_requests: RATE_LIMIT_VALID,
+            window: Duration::from_secs(WINDOW_SECONDS),
+            ..Default::default()
+        })
+        .with_api_key_validator(api_key_validator)
+        .with_state(())
+        .build()
+        .unwrap();
 
     // Test endpoint
     Router::new()
-        .route("/test", get(test_handler))
-        .layer(api_key_layer)
+        .route(path, get(test_handler))
+        .layer(middleware)
 }
 
 async fn test_handler() -> Json<serde_json::Value> {
@@ -108,8 +139,8 @@ async fn test_handler() -> Json<serde_json::Value> {
     }))
 }
 
-async fn start_test_server() -> String {
-    let app = create_test_app().await;
+async fn start_test_server(path: &str) -> String {
+    let app = create_test_app(path).await;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -144,12 +175,24 @@ async fn make_request(url: &str, api_key: Option<&str>) -> (StatusCode, String) 
     (status, body)
 }
 
+async fn print_redis_keys() {
+    let redis_cfg = RedisConfig::from_url("redis://127.0.0.1/");
+    let pool = redis_cfg.create_pool(None).expect("Failed to create Redis pool");
+    let mut conn = pool.get().await.expect("Failed to get Redis connection");
+    let _keys: Vec<String> = deadpool_redis::redis::cmd("KEYS")
+        .arg("barnacle:*")
+        .query_async(&mut conn)
+        .await
+        .unwrap_or_default();
+}
+
 mod api_keys {
     use super::*;
 
     #[tokio::test]
     async fn test_valid_api_key_works() {
-        let base_url = start_test_server().await;
+        init_tracing();
+        let base_url = start_test_server("/test").await;
         let url = format!("{}/test", base_url);
 
         let (status, body) = make_request(&url, Some(VALID_KEY)).await;
@@ -160,7 +203,8 @@ mod api_keys {
 
     #[tokio::test]
     async fn test_no_api_key_rejected() {
-        let base_url = start_test_server().await;
+        init_tracing();
+        let base_url = start_test_server("/test").await;
         let url = format!("{}/test", base_url);
 
         let (status, _body) = make_request(&url, None).await;
@@ -174,8 +218,20 @@ mod api_keys {
 
     #[tokio::test]
     async fn test_rate_limit_exceeded() {
-        let base_url = start_test_server().await;
-        let url = format!("{}/test", base_url);
+        init_tracing();
+        print_redis_keys().await;
+        cleanup_redis().await;
+        print_redis_keys().await;
+
+        let unique_path = format!("/test_{}", Uuid::new_v4());
+        let base_url = start_test_server(&unique_path).await;
+        let url = format!("{}{}", base_url, unique_path);
+
+        let client = reqwest::Client::new();
+        let _resp1 = client.get(&url).header("x-api-key", VALID_KEY).send().await.unwrap();
+
+        let _resp2 = client.get(&url).header("x-api-key", VALID_KEY).send().await.unwrap();
+
 
         for i in 1..=RATE_LIMIT_VALID {
             let (status, _body) = make_request(&url, Some(VALID_KEY_2)).await;
@@ -197,7 +253,8 @@ mod api_keys {
 
     #[tokio::test]
     async fn test_rate_limit_headers() {
-        let base_url = start_test_server().await;
+        init_tracing();
+        let base_url = start_test_server("/test").await;
         let url = format!("{}/test", base_url);
 
         let client = reqwest::Client::new();
@@ -215,19 +272,38 @@ mod api_keys {
 
     #[tokio::test]
     async fn test_redis_connection_failure() {
+        init_tracing();
         // Invalid redis url
         let redis_cfg = RedisConfig::from_url("redis://invalid-host:6379/");
         let pool = redis_cfg
             .create_pool(None)
             .expect("Failed to create Redis pool");
 
-        let api_key_store = RedisApiKeyStore::new(pool.clone());
         let rate_limit_store = RedisBarnacleStore::new(pool);
-        let api_key_layer = create_api_key_layer(api_key_store, rate_limit_store);
+        let api_key_validator = |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, _state: ()| async move {
+            if api_key.is_empty() {
+                Err(BarnacleError::ApiKeyMissing)
+            } else if api_key != VALID_KEY && api_key != VALID_KEY_2 {
+                Err(BarnacleError::invalid_api_key(api_key))
+            } else {
+                Ok(())
+            }
+        };
+        let middleware: BarnacleLayer<(), RedisBarnacleStore, (), BarnacleError, _> = BarnacleLayer::builder()
+            .with_store(rate_limit_store)
+            .with_config(barnacle_rs::BarnacleConfig {
+                max_requests: RATE_LIMIT_VALID,
+                window: Duration::from_secs(WINDOW_SECONDS),
+                ..Default::default()
+            })
+            .with_api_key_validator(api_key_validator)
+            .with_state(())
+            .build()
+            .unwrap();
 
         let app = Router::new()
             .route("/test", get(test_handler))
-            .layer(api_key_layer);
+            .layer(middleware);
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

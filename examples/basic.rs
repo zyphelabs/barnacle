@@ -7,10 +7,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use barnacle_rs::{
-    create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleConfig, BarnacleContext,
-    BarnacleKey, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess,
-};
+use barnacle_rs::{BarnacleConfig, BarnacleContext, BarnacleError, BarnacleKey, BarnacleLayer, BarnacleStore, KeyExtractable, RedisBarnacleStore, ResetOnSuccess};
 use serde::{Deserialize, Serialize};
 
 impl KeyExtractable for LoginRequest {
@@ -65,19 +62,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create different middleware layers for different endpoints
-    let login_limiter =
-        create_barnacle_layer_for_payload::<LoginRequest>(store.clone(), login_config.clone());
+    let login_layer: BarnacleLayer<LoginRequest, _, (), BarnacleError, ()> = BarnacleLayer::builder().with_store(store.clone()).with_config(login_config.clone()).build().unwrap();
 
-    let strict_limiter = create_barnacle_layer(store.clone(), strict_config);
-    let moderate_limiter = create_barnacle_layer(store.clone(), moderate_config);
+    let strict_layer: BarnacleLayer<(), _, (), BarnacleError, ()> = BarnacleLayer::builder().with_store(store.clone()).with_config(strict_config).build().unwrap();
+    let moderate_layer: BarnacleLayer<(), _, (), BarnacleError, ()> = BarnacleLayer::builder().with_store(store.clone()).with_config(moderate_config).build().unwrap();
 
     let app = Router::new()
-        .route("/api/strict", get(strict_endpoint).layer(strict_limiter))
+        .route("/api/strict", get(strict_endpoint).layer(strict_layer))
         .route(
             "/api/moderate",
-            get(moderate_endpoint).layer(moderate_limiter),
+            get(moderate_endpoint).layer(moderate_layer),
         )
-        .route("/api/login", post(login_endpoint).layer(login_limiter))
+        .route("/api/login", post(login_endpoint).layer(login_layer))
         .route("/api/reset/{:key_type}/{:value}", post(reset_rate_limit))
         .route("/api/status", get(status_endpoint))
         .with_state(state);

@@ -14,9 +14,7 @@
 //! ## Basic Usage
 //!
 //! ```rust,no_run
-//! use barnacle_rs::{
-//!     create_api_key_layer, ApiKeyMiddlewareConfig, BarnacleConfig
-//! };
+//! use barnacle_rs::{BarnacleLayer, ApiKeyConfig, BarnacleConfig};
 //! #[cfg(feature = "redis")]
 //! use barnacle_rs::{RedisApiKeyStore, RedisBarnacleStore, deadpool_redis};
 //! use std::time::Duration;
@@ -32,19 +30,21 @@
 //! #[cfg(feature = "redis")]
 //! let rate_limit_store = RedisBarnacleStore::new(redis_pool);
 //!
-//! // Create middleware
+//! // Create a Barnacle layer using the builder pattern
 //! #[cfg(feature = "redis")]
-//! let middleware = create_api_key_layer(api_key_store, rate_limit_store);
+//! let layer: BarnacleLayer<(), RedisBarnacleStore, ()> = BarnacleLayer::builder()
+//!     .with_store(rate_limit_store)
+//!     .with_config(BarnacleConfig::default())
+//!     .build()?;
 //!
 //! // Use with Axum router
 //! // let app = axum::Router::new()
 //! //     .route("/api/data", axum::routing::get(handler))
-//! //     .layer(middleware);
+//! //     .layer(layer);
 //! # Ok(())
 //! # }
 //! ```
 
-mod api_key_middleware;
 mod api_key_store;
 mod error;
 mod middleware;
@@ -52,30 +52,22 @@ mod redis_store;
 mod types;
 
 // Re-export key items for easier access
-pub use api_key_middleware::{
-    create_api_key_layer, create_api_key_layer_with_config,
-    create_api_key_layer_with_custom_validator, ApiKeyLayer,
-};
 pub use api_key_store::{ApiKeyStore, StaticApiKeyStore};
-pub use error::{BarnacleError, BarnacleResult};
+pub use error::BarnacleError;
 pub use middleware::{
-    create_barnacle_layer, create_barnacle_layer_for_payload, BarnacleLayer, KeyExtractable,
+    BarnacleLayer, KeyExtractable, BarnacleLayerBuilderError
 };
 pub use tracing;
 pub use types::{
-    ApiKeyMiddlewareConfig, ApiKeyValidationResult, BarnacleConfig, BarnacleContext, BarnacleKey,
-    ResetOnSuccess, StaticApiKeyConfig,
+    BarnacleConfig, BarnacleContext, BarnacleKey, BarnacleResult,
+    ResetOnSuccess, StaticApiKeyConfig, ApiKeyConfig,
 };
-
-// Re-export the legacy BarnacleResult type from types.rs for backward compatibility
-pub use types::BarnacleResult as LegacyBarnacleResult;
 
 // Redis-specific exports (only available with "redis" feature)
 #[cfg(feature = "redis")]
 pub use api_key_store::RedisApiKeyStore;
 #[cfg(feature = "redis")]
 pub use redis_store::RedisBarnacleStore;
-
 // Re-export commonly used external dependencies (only with redis feature)
 #[cfg(feature = "redis")]
 pub use deadpool_redis;
@@ -89,7 +81,7 @@ pub const BARNACLE_CUSTOM_PREFIX: &str = "barnacle:custom";
 
 /// Trait to abstract the rate limiter storage backend (e.g., Redis)
 #[async_trait]
-pub trait BarnacleStore: Send + Sync {
+pub trait BarnacleStore: Clone + Send + Sync {
     /// Increments the counter for the key and returns the current number of requests and remaining time until reset.
     async fn increment(
         &self,
@@ -99,3 +91,6 @@ pub trait BarnacleStore: Send + Sync {
     /// Resets the counter for the key (e.g., after successful login).
     async fn reset(&self, context: &BarnacleContext) -> Result<(), BarnacleError>;
 }
+
+
+

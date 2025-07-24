@@ -121,3 +121,49 @@ mod basic_unit_tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod barnacle_layer_unit_tests {
+    use axum::{body::Body, http::{request::Parts, Request}};
+    use barnacle_rs::{ApiKeyConfig, BarnacleError};
+    use reqwest::Method;
+    use std::sync::Arc;
+
+    #[derive(Clone)]
+    struct State { allowed: String }
+
+    fn build_state(allowed: &str) -> State {
+        State { allowed: allowed.to_string() }
+    }
+
+    fn build_parts() -> Arc<Parts> {
+        let req = Request::builder().uri("/test").method(Method::GET).body(Body::empty()).unwrap();
+        let (parts, _) = req.into_parts();
+        Arc::new(parts)
+    }
+
+    fn api_key_validator() -> impl Fn(String, ApiKeyConfig, Arc<Parts>, State) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), BarnacleError>> + Send>> + Clone {
+        |api_key: String, _api_key_config: ApiKeyConfig, _parts: Arc<Parts>, state: State| {
+            Box::pin(async move {
+                if state.allowed == api_key {
+                    Ok(())
+                } else {
+                    Err(BarnacleError::invalid_api_key(api_key))
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_api_key_validator_with_state() {
+        let state = build_state("test-key");
+        let validator = api_key_validator();
+        let parts = build_parts();
+        // Valid key
+        let result = validator("test-key".to_string(), ApiKeyConfig::default(), parts.clone(), state.clone()).await;
+        assert!(result.is_ok());
+        // Invalid key
+        let result = validator("invalid".to_string(), ApiKeyConfig::default(), parts, state).await;
+        assert!(result.is_err());
+    }
+}
